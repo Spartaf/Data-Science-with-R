@@ -1,0 +1,707 @@
+---
+title: "PCA and Clustering"
+author: "BOS Félix, QUEDEC Julien"
+date: "2023-12-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Importation du dataset
+library(ade4)
+# Importation des librairies d'affichage
+library(corrplot)
+library(plotly)
+library(skimr)
+library(ggplot2)
+library(GGally)
+library(heatmaply)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(dplyr)
+library(plotly)
+library(rgl)
+library(magrittr)
+library(scales)
+library(reshape2)
+# Importation des librairies pour l'ACP
+library(FactoMineR)
+library(factoextra)
+```
+
+# SOMMAIRE
+
+# 1. Analyse descriptive des données
+
+```{r Importation_donnees, echo = TRUE}
+data(doubs)
+df_env <- as.data.frame(doubs["env"])
+df_fish <- as.data.frame(doubs["fish"])
+df_species <- as.data.frame(doubs["species"])
+df_xy <- as.data.frame(doubs["xy"])
+```
+
+Voici le dataframe principal de notre analyse. Ce dataframe est composé de 30 lieux ainsi que de 11 variables. Chacune des 11 vrariables représente une caractéristique de la rivière du doubs. Nous pouvons retrouver entre autre : la distance à la source, l'altitude, la pente, le débit, le pH, le calcium, le phosphate, le nitrate, l'ammoniac, l'oxygene ainsi que la demande biologique en oxygene.
+
+```{r, echo = FALSE, fig.width=12, fig.height=6, fig.align='center'}
+kable(head(df_env), caption = "Tableau des données de l'environnement") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Voici le summary du jeu de données :
+
+```{r Summary, echo=FALSE, fig.width=12, fig.height=6, fig.align='center'}
+kable(summary(df_env), caption = "Summary des données d'environnement") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Nous pouvons voir que les données ne sont pas centrée et réduite en effet les moyennes des variables ne valent pas 0 et les variances ne valent pas 1.
+
+Nous pouvons centrer et réduire les données de la sorte :
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+scaled_data <- as.data.frame(scale(df_env))
+moyennes_variances <- data.frame(
+  Moyenne = round(apply(scaled_data, 2, mean), 1),
+  Variance = round(apply(scaled_data, 2, var), 1)
+)
+
+# Affichage du tableau avec kable
+kable(t(moyennes_variances), caption = "Moyennes et Variances des Colonnes de scaled_data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Voici le graphique densité des variables :
+
+```{r, echo=TRUE, fig.width=12, fig.height=6, fig.align='center'}
+doubs_env_long <- melt(df_env, id.vars = NULL)
+colnames(doubs_env_long) <- c("Variable", "Value")
+doubs_env_long_scaled <- melt(scaled_data, id.vars = NULL)
+colnames(doubs_env_long_scaled) <- c("Variable", "Value")
+
+ggplot(doubs_env_long_scaled, aes(x = Value, fill = Variable)) +
+  geom_histogram( aes(y = after_stat(density)), bins = 10)+
+  geom_density(alpha = 0.5) +
+  geom_vline(aes(xintercept = mean(Value)), linetype = "dashed")+
+  facet_wrap(~ Variable, scales = "free") +
+  theme_bw() +
+  labs(title = "Densités des Variables")
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+ggplot(doubs_env_long, aes(x = Value,fill = Variable)) +
+  geom_boxplot(colour = "black") +
+  facet_wrap(~Variable, ncol = 3, scales = "free_x") +
+  labs(x = "Variable", y = "Values") +
+  theme_bw()
+```
+
+Voici la matrice des corrélations
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+cor_matrix <- cor(df_env)
+ggplot(data = melt(cor_matrix), aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), vjust = 1)+
+  scale_fill_gradient2(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(title = "Correlation Matrix Heatmap")
+```
+
+# **2 PCA**
+
+**Q1** : On s'intéresse au tableau de données **Df_env**. Dans ce tableau nous pouvons remarquer que les élements de la colonne **"env.flo"** représentant le débit de chaque lieux de la rivière, prend des valeurs extrémements grandes (maximum : 6900) tandis que le maximum de la colonne **"env.ph"** est de 86. Nous avons donc une grande différence d'échelle entre les variables.
+
+La standardisation ou normalisation est donc nécessaire en effet si les variables ont des échelles différentes, celles qui ont des variances plus élevées auront un impact disproportionné sur le résultat de l'ACP. La standardisation permet donc de mettre les données à la même échelle.
+
+Une autre raison est la sensibilité aux unités en effet le jeu de données est composé de variable de différentes unités. La normalisation permet donc de rendre l'ACP moins dépendante des unités.
+
+Normalisons les données
+
+**Avant standardisation**
+
+```{r,echo=TRUE, fig.width=12, fig.height=6, fig.align='center'}
+moyennes_variances <- data.frame(
+  Moyenne = round(apply(df_env, 2, mean), 1),
+  Variance = round(apply(df_env, 2, var), 1)
+)
+kable(t(moyennes_variances), caption = "Moyennes et Variances des Colonnes de df_env") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Après standardisation**
+
+```{r, echo=TRUE, fig.width=12, fig.height=6, fig.align='center'}
+scaled_data <- as.data.frame(scale(df_env))
+moyennes_variances_scaled <- data.frame(
+  Moyenne = round(apply(scaled_data, 2, mean), 1),
+  Variance = round(apply(scaled_data, 2, var), 1)
+)
+kable(t(moyennes_variances_scaled), caption = "Moyennes et Variances des colonnes de scaled_data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Pour appuyer notre propos, en regardant les graphes des éboulis (scree plot) de l'ACP, nous observons une grande différence losrque les données sont standardisée ou non.
+
+En effet nous pouvons remarquer que dans le cas non standartisé la composante 1 explique 97% des données alors que dans le cas des données standardisées la première composante explique seulement 57.5% des données.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+res.pca <- PCA(df_env, scale.unit = F, graph = F, ncp = 7)
+res.pca.scaled <- PCA(scaled_data, scale.unit = T, graph = F, ncp = 7)
+
+p1 <- fviz_eig(res.pca, addlabels = TRUE, ylim = c(0,100))+
+  ggtitle("Données non standardisées")
+
+p2 <- fviz_eig(res.pca.scaled, addlabels = TRUE, ylim = c(0,65))+
+  ggtitle("Données standardisées")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+**Q2** : Pour trouver le nombre de composantes principales a garder nous allons observer le graphe des éboulis obtenu grace au jeu de données normalisés. Le graphe des éboulis représente la variance expliquée par chacun des axes principaux. Ici, nous remarquons qu' en gardant les 2 premières composantes princiaples (dimension 1, dimension 2) on explique 57,5% + 20,3% = 77,8% de l'information totale du jeu de données.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+fviz_eig(res.pca.scaled, addlabels = TRUE, ylim = c(0,65))+
+  ggtitle("Données standardisées")
+
+```
+
+Un autre argument pour appuyer notre choix est de regarder directement la projection des individus sur les axes en dimension 3. Pour cela nous allons projeter les points successivement sur (dim 1, 2), (dim 1,3), (dim 2,3). On considère que les individus sont bien représentés par les composantes principales si le cos2 \>=0.6. On peut donc remarquer ici que l'ajout de la troisième dimension n'ajoute pas plus d'avantage pour la représentation des données. En effet notre vision du jeu de données n'est pas grandement améliorée, de plus en observant la donnée de cos2 on se rend compte que les points ont un cos2 plus faible sur les couple de dimension (2, 3), (1,3) que sur la dimension (1,2) ce qui implique une bien moins bonne représentation des données.
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+p1 <- fviz_pca_ind(res.pca.scaled, pointsize = "cos2",geom = "point", pointshape = 21, fill = "#E7B800",repel = TRUE , axes = c(1, 2))+
+  ggtitle("Dim 1,2")
+  
+p2 <- fviz_pca_ind(res.pca.scaled, pointsize = "cos2",geom = "point", pointshape = 21, fill = "#E7B800",repel = TRUE , axes = c(1, 3))+
+  ggtitle("Dim 1,3")
+p3 <- fviz_pca_ind(res.pca.scaled, pointsize = "cos2", pointshape = 21, fill = "#E7B800",repel = TRUE , axes = c(2, 3), geom = "point")+
+  ggtitle("Dim 2,3")
+
+grid.arrange(p1, p2,p3,  nrow = 2)
+```
+
+**Q3** : Analysons le cercle des corrélations.
+
+```{r}
+fviz_pca_var(res.pca.scaled, axes = 1:2)
+```
+
+Pour interpreter le cercle des corrélations commencons d'abord par identifier les variables bien et celle mal représentés par les deux premieres composantes principales. Pour cela on a le critère du **cos2** qui nous indique que les variables ayant un cos2 \>= 0.6 sont bien représentées et celle qui ont un faible cos2 sont mals représentées.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+Matrice_corrélation_2 <- res.pca.scaled$var$cor**2
+
+Somme <- as.data.frame(rowSums(Matrice_corrélation_2[, c("Dim.1", "Dim.2")]))
+colnames(Somme) <- "Cos2"
+
+Somme2 <- as.data.frame(rowSums(res.pca.scaled$var$cos2[,c("Dim.1", "Dim.2")]))
+colnames(Somme2) <- "Cos2"
+kable(t(Somme2), caption = "COS2") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE)
+```
+
+On remarque que pour le pH on a un cos2 de 0.14 qui est donc très bas. On se gardera donc d'interpréter la corrélation de la variable env.pH.
+
+Analysons les corrélations entre les variables via le cercle des corélations et mettons les résultats en lien avec la matrice de corrélation.
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+cor_matrix <- cor(df_env)
+ggplot(data = melt(cor_matrix), aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), vjust = 1)+
+  scale_fill_gradient2(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(title = "Correlation Matrix Heatmap")
+```
+
+Dans l'ordre décroissant des mieux corrélées
+
+Les variables **env.slo** et **env.alt** sont très fortement corrélées car l'angle qui les sous-tend est nul, ces deux variables sont liés de manière linéaire, si l'une augmente, l'autre augmente. Il est en effet cohérent que plus une rivière est situé en altitude, plus la pente de cette dernière sera grande.
+
+Les variables suivante sont fortement corrélées positivement :
+
+-   Les variables **env.bdo** et **env.amm** en effet corr = 0.89 \> 0
+
+-   Les variables **env.pho** et **env.amm** sont fortement corrélés corr = 0.97 \> 0
+
+-   Les variables **env.dfs** et **env.har** sont fortement corrélés corr = 0.7 \> 0 .
+
+    Ici on pourrait se dire que **env.dfs** et **env.flo** sont beaucoup moins bien corrélé que **env.dfs** et **env.har** car l'angle est plus grand, sauf qu'en regardant la matrice des corrélation on se rend compte que c'est enfaite l'inverse ( 0.7 contre 0.95). Ceci peut etre expliqué par le fait que **env.har** est moins bien représentée par la PCA que les deux autres, en effet sont cos2 est plus faible.
+
+-   Les variables **env.flo** et **env.har** sont fortement corrélés corr = 0.7
+
+Les variables suivante sont fortement corrélées négativements :
+
+-   Les variables **env.alt** et **env.har** sont fortement corrélés négativements corr = -0.74 \< 0
+
+-   Les variables **env.slo** et **env.har** sont corrélés négativements corr = -0.65 \< 0
+
+-   Les variables **env.oxy** et **env.pho** sont corrélés négativements corr = -0.72 \< 0
+
+-   Les variables **env.oxy** et **env.amm** sont corrélés négativements corr = -0.72 \< 0
+
+-   Les variables **env.oxy** et **env.bdo** sont corrélés négativements corr = -0.84 \< 0
+
+-   Les variables **env.flo** et **env.alt** sont corrélés négativements corr = -0.87 \< 0
+
+-   Les variables **env.flo** et **env.slo** sont corrélés négativements corr = -0.72 \< 0
+
+-   Les variables **env.alt** et **env.dfs** sont fortement corrélés négativements corr = -0.94 \< 0
+
+-   Les variables **env.slo** et **env.dfs** sont corrélés négativements corr = -0.76 \< 0
+
+C'est résultats sont cohérent en effet par exemple pour les variables **env.flo** et **env.alt**, les rivières en basse altitude sont souvent situés sur des terrains plat, donc avec un débit moins élevé. Ou encore pour **env.slo** et **env.flo,** cela veut dire que les rivières avec une pente peut elevée ont tendance à avoir un grand débit.C'est un résultat cohérent. Les variables**env.alt** et **env.dfs** sont fortement négativements corrélés. En effet, les sources des rivières sont souvent situés en montagne et decendent le long de ces dernières. Il est donc raisonnable que l'altitude de la rivière diminue lorque l'on s'éloigne de la source (donc que env.dfs augmente). De même pour **env.slo** et **env.dfs** le résultat est cohérent c'est proche de la source que la pente de la rivière est la plus élévé car la source est situé en altitude (montagne...)
+
+Les variables suivante ne sont pas corrélées car il y a un angle de 90 degrés entre la représentation des variables sur le cercle. Ce qui se traduit aussi par un coefficient de corrélation assez bas.
+
+-   **env.pho** et **env.dfs** / **env.flo** / **env.har**
+
+-   **env.bdo** et **env.dfs** / **env.flo** / **env.har**
+
+-   **env.amm** et **env.dfs** / **env.flo** / **env.har**
+
+-   **env.alt** et **env.pho** / **env.bdo** / **env.amm**
+
+-   **env.slo** et **env.pho** / **env.bdo** / **env.amm**
+
+La positivité ou la négativité du coeficient de corrélation peut etre représenté de la manière suivante
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+my_colors <- colorRampPalette(c("white", "blue3"))(50)
+corrplot(cor_matrix, 
+               type = "lower", 
+               method = "ellipse", 
+               col = my_colors, 
+               tl.col = "black",
+         number.cex = 0)
+```
+
+Etudions maintenant la corrélation des variables avec les axes
+
+**AXE 1**
+
+-   La variable **env.nit** est fortement corrélé avec l'**axe 1**
+
+Cela permet de prévoir et d'expliquer le graphe des individus. Les sites d'observation de la rivière du Doubs qui sont situés à gauche du graphe des individus sont donc des sites où l'eau prélévée est faible en nitrate. A l'inverse, l'eau située dans les sites d'observations situés à droite du graphe des individus auront, une forte valeur en nitrate par rapport aux autres sites d'observations
+
+-   Les variables **env.pho**, **env.bdo**, **env.amm**, **env.dfs**, **env.flo**, **env.har** sont corrélés positivemment avec la première composante principale
+
+-   Les variables **env.alt**, **env.slo** et **env.oxy** sont corrélés négativements avec la première composante principale
+
+Ce veut dire que l'eau située dans les sites d'observations à gauche dans le graphe des individus sera riche en oxygène et que ces sites seront situés en haute altitude avec une pente de la rivière assez élevé par rapport aux autres sites d'observations
+
+A l'inverse, l'eau située dans les sites d'observation à droite dans le graphe des individus sera pauvre en oxygène et les sites d'observation seront localisés dans des endroits à faible altitude avec une pente de rivière peu elevée par rapport aux autres sites d'observations
+
+**Interprétation de l'axe 1:**
+
+On peut prévoir le graphe des individus
+
+Comme la plupart des varibales sont fortement corrélés avec l'axe 1 on a que l'eau provenant des sites d'observation qui ont une forte coordonnée sur l'axe 1 (à droite du graphe des individus) sont riches en calcium, phosphates, (très riches en )nitrates, amoniaque, et pauvres en oxygène. C'est pourquoi cette eau a aussi une forte demande biologique en oxygène. Les sites d'observation de la rivière qui ont de fortes coordonnées sur le premier axe (axe horizontale) sont aussi en faible altitude avec une faible pente pour la rivière et sont situés éloignés de la source de la rivière et la rivière de ces sites a un fort débit.
+
+A l'inverse, l'eau provenant des sites d'observation placés à gauche du graphes des individus (faible coordonnées sur l'axe 1) a une faible concentration en calcium, phosphates, (très faible en )nitrates, amoniaque, et riches en oxygène. Les sites d'observations ayant une faible coordonnée sur l'axe 1 auront les caractéristiques inversés que ceux ayant une forte coordonnée sur l'axe 1.
+
+**AXE 2**
+
+-   Les variables **env.alt**, **env.slo**, **env.bdo**, **env.pho**, **env.amm** sont corrélés postivements avec la deuxième composante principale
+
+-   Les variables **env.oxy**, **env.flo**, **env.dfs** et **env.har** sont corrélés négativements avec la deuxième composante principale
+
+-   La variable **env.nit** n'est casiment pas corrélée avec la 2 ème composante principale
+
+La concentration en nitrate de l'eau de la rivière ne va pas beaucoup dépendre du fait que le site d'observation soit en haut ou en bas du graphe des individus
+
+**Interprétation**
+
+L'eau de la rivière provenant de sites d'observations situés en haut du graphe des individus sera riche en phosphates, amoniaque et faible en oxygène et calcium avec une forte demande biologique en oxygène.
+
+Les sites d'obsersation situés en haut du graphe des individus seront donc ceux localisés dans des endroits à haute altitude, avec une pente de rivière élevé ainsi q'un débit de rivière faible. Ces sites seront également proches de la source de la rivière
+
+A l'invers les sites d'observation situés en bas du graphe des individus auront des caractéristiques opposées. L'eau prélevé dans les sites d'observations situées à gauche du graphique des individus aura aussi des caractéristiques opposés à celle prelevé sur des sites à en haut du graphe des individus.
+
+Contribution des variables aux composantes
+
+la variable **env.nit** contribue pour majorité à la première composante principale.
+
+La majorité des variables sont mieux corrélés à l'**axe 1** que à l'**axe 2** ce qui est normale car l'axe 2 est le deuxième axe de variabilité, il est moins important.
+
+**Q4 : Analysons les graphe des individus**
+
+Voici la projection des individus sur nos deux composantes principales
+
+```{r}
+fviz_pca_ind(res.pca.scaled, pointsize = "cos2", pointshape = 21, fill = "blue",
+             repel = TRUE , axes = c(1, 2))
+```
+
+On considère que les individus sont bien représentés par les deux première composantes principales si le cos2 \>=0.6.
+
+Voici les individus possèdant un cos2 \>= 0.6
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+fviz_pca_ind(res.pca.scaled, pointsize = "cos2", pointshape = 21, fill = "#E7B800",
+             repel = TRUE , axes = c(1, 2), select.ind = list(cos2 = 0.6))
+```
+
+Seul les individus **1,2,3,4,5,6,7,13,22,23,24,25,26,27,28,29,30** sont bien représentés dans le plan composé des 2 première composantes principales
+
+**Q5 : Analysons les graphe des individus**
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+fviz_pca_ind(res.pca.scaled, pointsize = "cos2", pointshape = 21, fill = "#E7B800",
+             repel = TRUE , axes = c(1, 2))
+```
+
+Trois groupes semblent se dessiner
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+groupes= c(rep(1,10),rep(2,12),rep(3,8))
+fviz_pca_ind (res.pca.scaled, col.ind=as.factor(groupes),
+              repel = TRUE ,pointsize = 4, axes = c(1, 2),
+              palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+              legend.title = "Groups")
+```
+
+Pour nous convaincre nous pouvons faire la projection sur les 3 premiers axes comme ceci
+
+```{r, echo=T, fig.width=12, fig.height=6, fig.align='center'}
+library(plotly)
+library(rgl)
+
+plot3d(res.pca.scaled$ind$coord[,1],res.pca.scaled$ind$coord[,2],res.pca.scaled$ind$coord[,3],
+       col="green",type="s",xlab="Dim1",ylab="Dim2",zlab="Dim3", size =1)
+
+p1 <- fviz_pca_ind (res.pca.scaled, col.ind=as.factor(groupes),
+              repel = TRUE ,pointsize = 4, axes = c(1, 2),
+              palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+              legend.title = "Groups")
+  
+p2 <- fviz_pca_ind (res.pca.scaled, col.ind=as.factor(groupes),
+              repel = TRUE ,pointsize = 4, axes = c(1, 3),
+              palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+              legend.title = "Groups")
+
+p3 <- fviz_pca_ind (res.pca.scaled, col.ind=as.factor(groupes),
+              repel = TRUE ,pointsize = 4, axes = c(2, 3),
+              palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+              legend.title = "Groups")
+
+grid.arrange(p1, p2,p3,  nrow = 2)
+```
+
+Dans tous les cas 3 groupes semblent se détacher
+
+**Signification des axes**
+
+**Signification Axe 1**
+
+Comme la plupart des varibales sont fortement corrélés avec l'axe 1 on a que L'eau provenant des sites d'observation qui ont une forte coordonnée sur l'axe 1 (à droite du graphe des individus) sont riches en calcium, phosphates, (très riches en )nitrates, amoniaque, et pauvres en oxygène. C'est pourquoi cette eau a aussi une forte demande biologique en oxygène. Les sites d'observation de la rivière qui ont de fortes coordonnées sur le premier axe (axe horizontale) sont aussi en faible altitude avec une faible pente pour la rivière et sont situés éloignés de la source de la rivière et la rivière de ces sites a un fort débit.
+
+A l'inverse,  l'eau provenant des sites d'observations placés à gauche du graphes des individus (faible coordonnées sur l'axe 1) a une faible concentration en calcium, phosphates, (très faible en )nitrates, amoniaque, et riches en oxygène. Cette eau a une faible demande biologique en oxygène. Les sites d'observation de la rivière qui ont de petites coordonnées sur le premier axe (axe horizontale) sont aussi en haute altitude avec une grande pente pour la rivière et sont situés proches de la source de la rivière et la rivière de ces sites a un faible débit.
+
+**Signification Axe 2**
+
+L'eau de la rivière provenant de sites d'observations situés en haut du graphe des individus sera riche en phosphates, amoniaque et faible en oxygène et calcium avec un forte demande  biologique en oxygène.
+
+Les sites d'obsersation situés en haut du graphe des individus seront donc ceux localités dans des endroits à haute altitude, avec une pente de rivière élevé un un débit de rivière faible. Ces sites seront proches de la source de la rivière
+
+A l'inverse les sites d'observation situés en bas du graphe des individus ont des caractéristiques opposés à ceux situés en haut.
+
+L'eau de la rivière provenant de ces sites a aussi des caractèristiques opposées a une eau ayant été prélevé sur un site qui se situe en haut du graphe des individus.
+
+**Caractérisation des groupes**
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+groupes= c(rep(1,10),rep(2,12),rep(3,8))
+fviz_pca_ind (res.pca.scaled, col.ind=as.factor(groupes),
+              repel = TRUE ,pointsize = 4, axes = c(1, 2),
+              palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+              legend.title = "Groups")
+```
+
+-   1er groupes : Le groupe en haut à gauche du graphe des individus (groupe bleu)
+
+Ces individus ont une faible coordonnée sur l'axe 1 et une forte coordonnée sur l'axe 2. Les sites d'observations de ce groupe sont donc localisés en haute altitude et sont proches de la source de la rivière. La portion de la rivière situé sur ces sites d'observation a un débit faible et une pente élevé.
+
+-   2eme groupe : Le groupe situé au milieu/bas du graphe des individus (groupe jaune)
+
+Ces individus ont des faibles coordonnées sur l'axe 2 et sont proches du milieu de l'axe 1. On base donc principalement l'interprétation de ce groupe d'individu grâce à l'interprétation de l'axe 2.
+
+Donc l'eau de la rivière provenant des sites d'observations du groupe 2 est pauvre en phosphate, en amoniaque et riche en calcium et en oxygène avec une faible demande biologique en oxygène. Les sites d'obsersation du 2ème groupe sont donc ceux localisés dans des endroits à basse altitude, avec une pente de rivière faible un un débit de rivière fort. Ces sites seront également éloignés de la source de la rivière
+
+-   3ème groupe : Le groupe situé à droite du graphe des individus (groupe rouges)
+
+Ces individus ont des grosses coordonnées sur l'axe 1, comme l'axe 1 représente la première composante principale, on peut donc donner a ce groupe une interprétation basé sur l'interprétation de l'axe 1
+
+L'eau provenant des sites d'observation de ce groupe est riche en calcium, phosphates, (très riches en )nitrates, amoniaque, et pauvres en oxygène. C'est pourquoi cette eau a aussi une forte demande biologique en oxygène. Les sites d'observation de la rivière du 3ème groupe sont aussi en faible altitude avec une faible pente pour la rivière et sont situés éloignés de la source de la rivière et la rivière de ces sites a un fort débit.
+
+**Mise en opposition des groupes**
+
+Le 1er groupe(groupe bleu) et le 3ème groupe(groupe rouge) sont éoignés sur l'axe 1. Comme l'axe 1 représente la première composante principale, on en déduit que les sites d'observation (individus) du groupes 1 et ceux du groupes deux sont situés à distance à la source très différentes et à une altitude très différentes.
+
+De même, la composition(calcium,phosphates, nitrates, amoniaque, oxygène et demande biologique en oxygène) de l'eau de la rivière prélevé sur les sites du groupe 1 est très différente de la composition de l'eau de la rivière prélevé sur les sites du groupe 2.
+
+**Q6 : Analyse finale de la PCA**
+
+```{r,echo=F, fig.width=12, fig.height=6, fig.align='center'}
+res.pca.scaled <- PCA(scaled_data, scale.unit = T, graph = F, ncp = 7)
+fviz_pca_biplot(res.pca.scaled)
+```
+
+Dans cette ACP, on a pu mettre en évidence **3 groupes** d'individus.
+
+De plus on a pu déduire les informations suivantes : la qualité de l'eau prélevée est lié à la typologie des sites. En effet, si l'altitude d'un site augmente, la concentration en oxygène de l'eau qui y est prévelé augmente tandis que la concentration en calcium,phosphates, nitrates, amoniaque diminue. Si la distance d'un site avec la source diminue,  la concentration en oxygène de l'eau qui y est prévelé augmente tandis que la concentration en calcium,phosphates, nitrates, amoniaque diminue. Les rivières situés en haute altitude et proche de la source vont avoir un débit faible et une pente raide ce qui est logique car les sources de rivières sont souvent situés en montagne.
+
+# 3. KMEANS
+
+Voici une première représentation de la distance entre les individus
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+scaled_data <- scale(df_env)
+distance <- get_dist(scaled_data)
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+```
+
+Appliquons l'algorithme des Kmeans au jeu de données centré et réduit avec en hyperparamètre un nombre de cluster = 3. Comme sur notre analyse de l'ACP.
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+Kmean <- kmeans(scaled_data, centers = 3, nstart = 25)
+fviz_cluster(Kmean, data = scaled_data)
+```
+
+La projection sur notre PCA nous donne :
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+fviz_pca_ind(res.pca.scaled, col.ind=as.factor(Kmean$cluster) ,geom.ind = "point"                ,axes = c(1, 2),
+             pointsize = 3,
+             palette = c("#00AFBB", "#E7B800", "#FC4E07", "green"),
+             legend.title = "Groups")
+```
+
+**Q1** :
+
+```{r}
+ggplot(df_xy, aes(x = xy.x, y = xy.y, color = factor(Kmean$cluster))) +
+  geom_point(size = 4) +
+  labs(title = "Position des 30 lieux de la rivière", x = "x", y = "y") +
+  theme_minimal()+
+  geom_text(aes(label = 1:nrow(df_xy)), vjust = -0.8, hjust = 0.5) +
+  guides(color = guide_legend(title = NULL))
+```
+
+**Q2** : On obtient des résultats différents si on recommence une classification. En effet les points initiaux sont choisis aléatoirement, pour remédier à ce problème nous devons **set.seed(n)** avec n un nombre fixe.
+
+```{r}
+set.seed(345)
+```
+
+Le choix du nombre de cluster est une étape importante.
+
+Voici différent clustering avec des nombres de clusters différents
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+kmean2 <- kmeans(scaled_data, centers = 2, nstart = 25)
+kmean3 <- kmeans(scaled_data, centers = 3, nstart = 25)
+kmean4 <- kmeans(scaled_data, centers = 4, nstart = 25)
+
+p1 <- fviz_cluster(kmean2, geom = "point", data = scaled_data) + ggtitle("k = 2")
+p2 <- fviz_cluster(kmean3, geom = "point",  data = scaled_data) + ggtitle("k = 3")
+p3 <- fviz_cluster(kmean4, geom = "point",  data = scaled_data) + ggtitle("k = 4")
+
+grid.arrange(p1, p2, p3, nrow = 2)
+```
+
+Pour choisir au mieux le nombre de cluster necéssaire plusieurs méthodes existent celles que nous allons utiliser sont :
+
+-   Méthode du coude
+
+-   Méthode silhouette
+
+Ces deux méthode fonctionnent de manière similaire en testant avec plusieurs k et en esseyant de choisir le cas qui minimise l'inertie intra classe.
+
+Le but est de minimiser l'inertie intra-classe, c'est-à-dire de réduire la dispersion des points au sein de chaque groupe formé par le processus de clustering, tout en cherchant simultanément à maximiser la dispersion inter-classe, c'est-à-dire la distance entre les différents groupes. En d'autres termes, l'objectif global est d'obtenir des clusters bien définis et séparés les uns des autres, avec des observations similaires regroupées au sein de chaque cluster et des observations distinctes réparties entre les différents clusters. Ce compromis entre la compacité intra-classe et la séparation inter-classe contribue à créer des regroupements significatifs dans les données.
+
+Appliquons ces deux méthodes
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+p1 <- fviz_nbclust(scaled_data, kmeans, method = "wss")+
+  ggtitle("Coude")
+p2 <- fviz_nbclust(scaled_data, kmeans, method = "silhouette")+
+  ggtitle("Silhouette")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+La methode du coude nous donne un nombre de cluster de 4 en effet on cherche le trade-off optimal entre le nombre de clusters et l'inercie intra class.
+
+La méthode silhouette nous donne un nombre de clusters de 2.
+
+A partir de l'observation de ces deux méthodes nous allons donc choisir un nombre d cluster égale à 4.
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+Final_Kmeans <- kmeans(scaled_data, 4, nstart = 25) 
+p1 <- fviz_cluster(Final_Kmeans, data = scaled_data)
+p2 <- ggplot(df_xy, aes(x = xy.x, y = xy.y, color = factor(Final_Kmeans$cluster))) +
+  geom_point(size = 4) +
+  labs(title = "Position des 30 lieux de la rivière", x = "x", y = "y") +
+  theme_minimal()+
+  guides(color = guide_legend(title = NULL))
+grid.arrange(p1, p2, nrow = 1)
+```
+
+**Q3** : L'option "nstart" spécifie le nombre de points de départ aléatoires que l'algorithme doit utiliser lorqu'il effectue plusieurs initialisation pour trouver le meilleur ensemble de cluster. L'option "nstart" permet de lancer plusieur fois l'algorithme avec des configurations initiales différente et de selectionne la meilleure.
+
+**Q4** :
+
+```{r, echo=F, fig.width=12, fig.height=6, fig.align='center'}
+inertia_values <- numeric()
+for (i in 1: 10) {
+  kmeans_result <- kmeans(scaled_data, centers = i)
+  inertia_values[i] <- kmeans_result$tot.withinss
+}
+ggplot() +
+  geom_line(aes(x = 1:10, y = inertia_values)) +
+  geom_point(aes(x = 1:10, y = inertia_values)) +
+  labs(title = "Inertie intraclasse en fonction du nombre de clusters (k)",
+       x = "Nombre de clusters (k)",
+       y = "Inertie intraclasse")
+```
+
+Par ce graphique qui est exactement celui du critère du coude on remarque qu'il faut 4 clusters. C'est le parfait trade-off.
+
+# **4. CAH**
+
+```{r}
+Matrice_distance_euclidienne_scaled <- dist(scaled_data, method = "euclidian")
+Matrice_distance_euclidienne <- dist(df_env, method = "euclidian")
+```
+
+**Q1** : Les différentes distances que nous pouvons utiliser sont :
+
+-   **Distance du lien simple** : La distance du lien simple entre deux cluster est la plus petite distance possible entre deux points de chacun des deux clusters .
+
+-   **Distance du lien moyen** : La distance du lien moyen entre deux cluster est la moyenne de toutes les distances entre les points d'un cluster et les points de l'autre cluster.
+
+-   **Distance du lien complet** : La distance du lien complet entre deux culster est la plus grande distance possible entre deux points de chacun des deux groupes.
+
+-   **Distance de Ward** : La distance de Ward entre deux classes est celle de leurs barycentres au carré, pondérée par les effectifs des deux clusters.
+
+On utilise classiquement la distance de Ward car elle permet d'assurer des fusions optimales entre les groupes en terme d'inertie intra-classe. Elle vise à regrouper les individus de telle manière que la variance soit minimale à l'intérieur de chaque groupe nouvellement formé. Cela conduit souvent à des regroupements compacts et homogènes.
+
+**Q2** : Appliquons l'algorithme CAH avec la distance de Ward ainsi que celle du lien simple
+
+**Lien simple** **:**
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+hclust_result_simple <- hclust(dist(df_env),method="single")
+plot(hclust_result_simple, main = "Dendrogramme", sub = NULL)
+```
+
+Pour déterminer le nombre optimal de classes, on regarde la perte d'inertie inter-classes. En effet, on part d'une situation où il n'y a que de l'inertie inter-classes (chaque classe comprenant un seul individu, il n'y a pas d'inertie intra-classe). Au fur et à mesure des regroupements, on va donc perdre en inertie inter-classes, jusqu'à la dernière étape où il y a une classe avec tous les individus et donc plus d'inertie inter. Le but du jeu consiste à "stopper" l'aggrégation avant de perdre une forte quantité d'inertie inter-classe. Ce diagramme ressemble très fortement à l'éboulis des valeurs propres, et on cherche à peu près la même chose (un saut).
+
+```{r}
+barplot(hclust_result_simple$height,horiz = T,main="Gain d'inertie intra sur les agrégations ",
+          col="lightblue",border = "grey")
+```
+
+Un saut notable est visible à la dernière fusion, on choisit donc de conserver 2 groupes.
+
+**29,30** et **10,9,8,7,3,1,2,6,4,5,25,28,26,27,16,15,13,14,11,12,20,19,17,18,21,22,23,24**
+
+**Distance de Ward :**
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+hclust_result_ward <- hclust(dist(scaled_data), method = "ward.D2")
+plot(hclust_result_ward, main = "Dendrogramme", sub = NULL)
+```
+
+```{r}
+barplot(hclust_result_ward$height,horiz = T,main="Gain d'inertie intra sur les agrégations ",
+          col="lightblue",border = "grey")
+```
+
+Plusieurs grands sauts sont visibles à partir de **Height = 6**.
+
+On choisit de donc de conserver 4 groupes **9,5,8,4,7,3,2,6,1,10** ; **23,25** ; **29,30,24,26,27,28** ; **19,20,17,18,16,21,22,15,12,14,11,13.**
+
+Voici la représentation des individus en fonction des différents groupes ci-dessus
+
+```{r, echo=T}
+groupe1 <- c(9, 5, 8, 4, 7, 3, 2, 6, 1, 10)
+groupe2 <- c(23, 25)
+groupe3 <- c(29, 30, 24, 26, 27, 28)
+groupe4 <- c(19, 20, 17, 18, 16, 21, 22, 15, 12, 14, 11, 13)
+
+couleurs <- c("red", "blue", "green", "purple")
+indices_groupes <- c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 3, 2, 3, 3, 3, 3, 3)
+
+# Convertir indices_groupes en facteur
+indices_groupes <- factor(indices_groupes)
+
+ggplot(df_xy, aes(x = xy.x, y = xy.y, color = indices_groupes)) +
+  geom_point(size = 4) +
+  scale_color_manual(values = couleurs) +
+  geom_text(aes(label = 1:nrow(df_xy)), vjust = -0.8, hjust = 0.5) +
+  labs(title = "Position des 30 lieux de la rivière", x = "x", y = "y") +
+  theme_minimal() +
+  guides(color = guide_legend(title = NULL))
+
+```
+
+Pour les groupes mis en évidence pour la méthode CAH, on gardera les groupes découverts en utilisant la distance de Ward
+
+CAH : 4 groupes : {9,5,8,4,7,3,2,6,1,10} ; {23,25} ; {29,30,24,26,27,28} ; {19,20,17,18,16,21,22,15,12,14,11,13}
+
+K-means : 4 groupes : {1,2,3,4,5,6,7,8,9,10} ; {11,12,13,14,15,16,17,18,19,20}; {21,22,23,24,25,26,27,28}; {29,30}
+
+ACP : 3 groupes : {1,2,3,4,5,6,7,8,9,10} {11,12,13,14,15,16,17,18,19,20,21,22} {23,24,25,26,27,28,29,30}
+
+Les méthodes CAH et K-means étant plus fiables que notre interpréation, on décide de constituer 4 groupes avec les informations ci dessus
+
+groupe 1: {1,2,3,4,5,6,7,8,9,10}
+
+groupe 2 : {11,12,13,14,15,16,17,18,19,20,21,22}
+
+groupe 3 : {23;24;25}
+
+groupe 4 : {26;27;28;29;30}
+
+En s'aidant des bases de données, on fait des interprétation en comparant les caractéristiques de l'eau prélevée dans sites d'observation des 4 groupes. On compare aussi les caractéristiques des sites d'observation
+
+**groupe 1:** Les sites d'observation du groupe 1 sont localisés en haute altitude et sont proches de la source de la rivière. La portion de la rivière situé sur ces sites d'observation a un débit faible et une pente élevé.
+
+L'eau prélevé sur ces sites d'observation est riche en oxygène et faible en calcium,phosphates, nitrates, amoniaque, avec une faible demande biologique en oxygène
+
+**groupe 2:**
+
+Les sites d'observation du groupe 2 sont localisés en moyenne altitude et sont moyennement éloignés de la source de la rivière. La portion de la rivière situé sur ces sites d'observation a un débit moyennement élevé et une pente faible.
+
+L'eau prélevé sur ces sites d'observation est riche en oxygène et moyennement concentré en calcium,phosphates, nitrates, amoniaque, avec une demande moyenne biologique en oxygène
+
+**groupe 3:**
+
+Les sites d'observation du groupe 3 ont les mêmes caractéristiques que ceux du groupe 2
+
+La pente et le débit de la rivière sont aussi similaires.
+
+Cependant, l'eau prélevée sur les sites d'observation du groupe 3 est bien plus riche en phosphates, nitrate, amoniaque que l'eau provenant des sites d'observation des autres groupes.
+
+De plus, l'eau provenant des sites d'obersation du groupe 3 a une demande biologique en oxygène très élevé comparé à celle des autres groupes.
+
+**groupe 4:** Les sites d'observation du groupe 4 sont localisés en faible altitude et sont éloignés de la source de la rivière comparé aux autres sites d'observation des autres groupes. La portion de la rivière situé sur ces sites d'observation a un débit élevé et une pente faible comparé aux portions de la rivière des autres groupes.
+
+L'eau prélevé sur ces sites d'observation est pauvre en oxygène et riche en calcium,phosphates, nitrates, amoniaque, avec une forte demande biologique en oxygène
+
+**Conclusion**
+
+Les eau prélevées dans tous les sites d'observation de tous les groupes ont un PH similaire, on ne peut donc rien en déduire, le fait de ne pas avoir pu interpréter la variable de PH dans l'ACP est donc normal.
+
+Les descriptions des 4 groupes à l'aide du tableau de données est globalement similaire à la description donnée par le graphe des individus de l'ACP, l'ACP réalisé avec les 2 premières composantes principales a donc été éfficace.
+
+On déduit de l'observation des 4 groupes que typologie d'un site a un impact sur la qualité de l'eau prélevé sur ce site.
+
+En effet, si l'altitude d'un site augmente, la concentration en oxygène de l'eau qui y est prévelé augmente tandis que la concentration en calcium,phosphates, nitrates, amoniaque diminue.
+
+si la distance d'un site avec la source diminue, la concentration en oxygène de l'eau qui y est prévelé augmente tandis que la concentration en calcium,phosphates, nitrates, amoniaque diminue.
+
+Les rivières situés en haute altitude et proche de la source vont avoir un débit faible et une pente raide ce qui est logique car les sources de rivières sont souvent situés en montagne
