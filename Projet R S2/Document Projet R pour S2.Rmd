@@ -1,0 +1,1496 @@
+---
+title: "Classification binaire avec imputation et sélection de variables"
+author: "BOS Félix, QUEDEC Julien, Nkaba Antouo Nahncy"
+date: "2024-04-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+# Importation des librairies d'affichage
+library(corrplot)
+library(plotly)
+library(skimr)
+library(ggplot2)
+library(GGally)
+library(heatmaply)
+library(gridExtra)
+library(tidyverse)
+
+library(kableExtra)
+library(rgl)
+library(magrittr)
+library(scales)
+library(reshape2)
+library(furniture)
+library(MASS)
+library(broom)
+library(dplyr)
+# Importation des librairies pour l'ACP
+library(FactoMineR)
+library(factoextra)
+# Importation des librairies pour Imputation
+library(mice)
+library(missForest)
+```
+
+```{r}
+set.seed(200)
+```
+
+# **1. Analyse descriptive des données et application sur R Shiny**
+
+Le Rshiny est à cette adresse : <https://felix-bos-studio.shinyapps.io/Projet-S2-R-APP/> la partie classification n'est pas dutout au point se réferer au Rmarkdown.
+
+Le jeu de données que nous allons utiliser lors de ce projet est le bien connu " Breast Cancer Wisconsin Dataset".
+
+Ce dataset va nous permettre de réaliser une tâche de classification binaire visant à anticiper le diagnostic d'une tumeur du seins, la qualifiant soit de maligne ( cancéreuse ) , soit de bénigne (non cancéreuse ). Les données proviennent de biopsies de tumeurs mammaires effectuées à l'université du Wisconsin. Plus précisément, les données proviennent d'une image numérisée obtenue à partir d'une procédure médicale appelée aspiration à l'aiguille fine (AAF). L'AAF est une technique utilisée pour prélever des échantillons de tissu d'une masse mammaire. Une fois que ces échantillons ont été prélevés, des caractéristiques sont extraites de l'image numérisée résultante.
+
+Chaque instance de l'ensemble de données contient les informations suivantes :
+
+-   **Numéro d'identification** : Un identifiant unique pour chaque échantillon.
+
+-   **Diagnostic** : La variable cible indiquant le diagnostic, 'M' pour malin et 'B' pour bénin.
+
+Pour chaque noyau cellulaire, dix caractéristiques à valeurs réelles (continues) sont calculées, incluant :
+
+-   **Radius (Rayon)** : La distance moyenne du centre aux points sur le pourtour du noyau.
+
+-   **Texture (Texture)** : L'écart-type des valeurs d'échelle de gris dans le noyau.
+
+-   **Perimeter (Périmètre)** : Le périmètre du noyau.
+
+-   **Area (Surface)** : La superficie du noyau.
+
+-   **Smoothness (Douceur)** : Une mesure de la variation locale des longueurs de rayon.
+
+-   **Compactness (Compacité)** : Calculée comme le carré du périmètre divisé par la surface moins 1,0.
+
+-   **Concavity (Concavité)** : Décrit la sévérité des parties concaves du contour du noyau.
+
+-   **Concave points (Points concaves)** : Représent le nombre de parties concaves du contour du noyau.
+
+-   **Symmetry (Symétrie)** : Mesure de la symétrie du noyau.
+
+-   **Fractal dimension (Dimension fractale**) : Caractéristique qui approxime la "ligne de côte", bordure du noyau, utilisant le concept de géométrie fractale.
+
+Ces caractéristiques fournissent des mesures quantitatives qui peuvent être exploitées pour évaluer les propriétés des noyaux cellulaires, facilitant ainsi la distinction entre les tumeurs mammaires malignes et bénignes. En entraînant un modèle d'apprentissage automatique sur cet ensemble de données, il est possible de créer un modèle prédictif contribuant à la détection précoce et au diagnostic du cancer du sein.
+
+## 1.1 Importation des données
+
+Nous avons téléchargé le jeu de données en CSV via Kaggle.
+
+```{r, echo = F, include=FALSE}
+#("C:/Users/quede/OneDrive/Documents/L3/R/Projet R S2")
+#setwd("C:/Users/Bos/Documents/Informatique/ISUP1/R/Projet R S2")
+data <- as.data.frame(read.csv("data/data_cancer.csv"))
+```
+
+```{r, echo = FALSE, fig.width=6, fig.height=6, fig.align='center'}
+kable(head(data), caption = "Tableau des données") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+## 1.2 Nettoyage des données
+
+Dans notre jeu de données nous pouvons observer deux variables qui ne nous serons pas utile pour la suite de l'analyse : **id**, **X** .
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+data <- dplyr::select(data, -c(id, X))
+kable(t(colnames(data)), caption = "Tableau des données") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+Nous pouvons remarquer que la variable target **diagnosis** est catégorielle valant M et B. Pour permettre à l'odrinateur de mieux traiter cette infomation nous allons encoder cette variable. Nous aurons donc 1 pour M et 0 pour B.
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+diagnosis_binary <- ifelse(data$diagnosis == "M", 1, 0)
+data <- cbind(diagnosis_binary = diagnosis_binary, data)
+kable(head(data), caption = "Tableau des données") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+Maintenant que notre jeu de données est nettoyé, une étape cruciale est de vérifier s'il y a des valeurs manquantes. En effet, lors de l'apprentissage, il est essentiel d'avoir suffisamment de données pour éviter les biais potentiels. De plus, connaître la quantité de valeurs manquantes peut nous aider à orienter nos choix de méthodes d'apprentissage. Par exemple, nous pourrions envisager d'utiliser des techniques d'imputation pour remplacer les valeurs manquantes, comme nous le verrons par la suite. De plus, cela pourrait nous aider à choisir certains algorithmes qui fonctionnent mieux sur de petits jeux de données.
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+missing_data <- data.frame(
+  variable = names(data),
+  missing_count = colSums(is.na(data))
+)
+ggplot(missing_data, aes(x = reorder(variable, -missing_count), y = missing_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Nombre de valeurs manquantes par variable",
+       x = "Variables",
+       y = "Nombre de valeurs manquantes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Nous pouvons obesrver sur ce graphique qu'il n'y a pas de valeurs manquante sur ce dataset.
+
+Nous devons a présent vérifier si il est necéssaire ou non de standardiser les données. En effet nous allons essayer d'utiliser une PCA pour la réduction de la dimmension. La standardisation ou normalisation est donc nécessaire en effet si les variables ont des échelles différentes, celles qui ont des variances plus élevées auront un impact disproportionné sur le résultat de l'ACP. La standardisation permet donc de mettre les données à la même échelle.
+
+Une autre raison est la sensibilité aux unités en effet le jeu de données est composé de variable de différentes unités. La normalisation permet donc de rendre l'ACP moins dépendante des unités.
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+# Calculer la moyenne et la variance de chaque variable
+means <- sapply(data, mean)
+variances <- sapply(data, var)
+summary_table <- data.frame(Moyenne = means,
+                            Variance = variances)
+kable(t(summary_table), caption = "Tableau des données") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+Nous obesrvons de grands écarts de variance. Nous allons donc créer une copie du jeu de données mais standardisé.
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+scaled_data <- as.data.frame(scale(dplyr::select(data, -diagnosis)))
+moyennes_variances_scaled <- data.frame(
+  Moyenne = round(apply(scaled_data, 2, mean), 1),
+  Variance = round(apply(scaled_data, 2, var), 1)
+)
+kable(t(moyennes_variances_scaled), caption = "Moyennes et Variances des colonnes de scaled_data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Nous avons donc bien à présent un jeu de données standardisé.
+
+## **1.3 Analyse de la variable Target**
+
+Notre objectif est de prédire la variable cible **diagnosis** en utilisant les autres variables comme caractéristiques, dans le cadre d'un algorithme de classification binaire. Il est donc crucial d'analyser cette variable cible. Par exemple, il est essentiel de vérifier qu'il n'y a pas de déséquilibre important entre les deux classes "M" (maligne) et "B" (bénigne).
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+effectifs <- table(data$diagnosis)
+
+df_effectifs <- data.frame(diagnosis = names(effectifs),
+                           effectifs = as.numeric(effectifs))
+
+ggplot(df_effectifs, aes(x = "", y = effectifs, fill = diagnosis)) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_text(aes(label = effectifs), position = position_stack(vjust = 0.5)) +
+  coord_polar("y", start = 0) +
+  scale_fill_manual(values = c("B" = "skyblue", "M" = "salmon")) +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Répartition des diagnostics")
+```
+
+Nous pouvons observer qu'il y 145 individus de différence entre les deux groupe. Ce qui n'est pas négligeable. Notre jeu de donnée est un peu unbalance. Nous devons donc le prendre en compte dans nos analyses.
+
+## **1.4 Analyse des variables caractéristiques**
+
+Les variables caractéristiques sont celles qui seront utilisées pour prédire si un individu est atteint d'une tumeur cancéreuse ou non. L'analyse de ces caractéristiques est donc cruciale pour les prédictions futures. Le plus important à analyser reste les relation Target / features qui sera abodrer dans la prochaine section.
+
+Dans le dataset, nous pouvons identifier trois différents groupes de caractéristiques : "mean", "worst", et "se" (standard error). Lors de l'analyse de la relation entre la variable cible et les caractéristiques, nous examinerons l'impact de ces différents groupes sur la variable target. Ensuite, nous pourrions envisager de ne conserver qu'un seul de ces groupes afin de réduire le nombre de features. Pour nous faciliter la suite nous allons creer un dataset pour chaque groupe. Nous pouvons aussi créer un data set de benin et de maligne.
+
+```{r}
+mean_colonnes <- c("diagnosis_binary", 
+                      "radius_mean", 
+                      "texture_mean", 
+                      "perimeter_mean",
+                      "area_mean",
+                      "smoothness_mean",
+                      "compactness_mean",
+                      "concavity_mean",
+                      "concave.points_mean",
+                      "symmetry_mean",
+                      "fractal_dimension_mean")
+worst_colonnes <- c("diagnosis_binary", 
+                      "radius_worst", 
+                      "texture_worst", 
+                      "perimeter_worst",
+                      "area_worst",
+                      "smoothness_worst",
+                      "compactness_worst",
+                      "concavity_worst",
+                      "concave.points_worst",
+                      "symmetry_worst",
+                      "fractal_dimension_worst")
+se_colonnes <- c("diagnosis_binary", 
+                      "radius_se", 
+                      "texture_se", 
+                      "perimeter_se",
+                      "area_se",
+                      "smoothness_se",
+                      "compactness_se",
+                      "concavity_se",
+                      "concave.points_se",
+                      "symmetry_se",
+                      "fractal_dimension_se")
+
+data_mean <- data[, mean_colonnes]
+data_mean_scaled <- scaled_data[, mean_colonnes]
+
+data_worst <- data[,worst_colonnes]
+data_worst_scaled <- scaled_data[,worst_colonnes]
+
+data_se <- data[, se_colonnes]
+data_se_scaled <- scaled_data[, se_colonnes]
+
+data_malign <- data[data$diagnosis == "M", ]
+data_malign_scaled <- scaled_data[data$diagnosis == "M", ]
+
+data_bening <- data[data$diagnosis == "B", ]
+data_bening_scaled <- scaled_data[data$diagnosis == "B", ]
+```
+
+Nous pouvons obesrver les histogramme de densité de ces différentes variables dans chacun des groupes.
+
+```{r,fig.width=16, fig.height=10,fig.align='center'}
+create_histogram_with_density <- function(data, variable) {
+  ggplot(data, aes(x = !!sym(variable))) +
+    geom_histogram(fill = "skyblue", color = "black", bins = 30, aes(y = ..density..)) +
+    geom_density(color = "red") +  # Ajouter la densité KDE en rouge
+    labs(title = NULL,  # Supprimer le titre
+         x = variable,  # Supprimer l'axe des abscisses
+         y = NULL) +  # Supprimer l'axe des ordonnées
+    theme(axis.title.y = element_blank(),  # Supprimer le titre de l'axe y
+          axis.ticks.y = element_blank())  # Supprimer les ticks de l'axe y
+}
+
+# Liste pour stocker les graphiques
+plot_list <- list()
+
+# Boucle à travers chaque variable dans le dataframe
+for (col in colnames(data)) {
+  if (is.numeric(data[[col]])) {  # Vérifier si la variable est numérique
+    plot_list[[col]] <- create_histogram_with_density(scaled_data, col)  # Créer le graphique
+  }
+}
+
+# Afficher les graphiques en utilisant grid.arrange
+gridExtra::grid.arrange(grobs = plot_list)
+```
+
+Nous pouvons afficher un summary pour chacun des groupes.
+
+```{r, fig.width=7, fig.height=6, fig.align='center'}
+kable(summary(data_mean), caption = "Tableau des données mean") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+```{r , fig.width=7, fig.height=6, fig.align='center'}
+kable(summary(data_worst), caption = "Tableau des données wosrt") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+```{r, fig.width=7, fig.height=6, fig.align='center'}
+kable(summary(data_se), caption = "Tableau des données mean") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+## **1.5 Analyse des relations Target / Features**
+
+L'aspect le plus crucial de l'analyse du dataset réside probablement dans la compréhension des différentes relations entre les variables caractéristiques (features) et la variable cible. Cette analyse nous permet de formuler des hypothèses à vérifier ultérieurement à l'aide de tests statistiques.
+
+Pour chaque groupe, nous allons examiner la densité de chaque caractéristique du groupe en fonction de la variable cible. Nous cherchons les caractéristique telles que les deux densités soient les plus différentes
+
+Pour le groupe mean :
+
+```{r, fig.width=20, fig.height=10, fig.align='center'}
+df_mean_malign <- data_malign[, mean_colonnes]
+df_mean_bening <- data_bening[, mean_colonnes]
+
+colors <- c("malignant" = "lightgreen", "benign" = "lightblue")
+
+plots_list <- lapply(mean_colonnes, function(col) {
+  ggplot() +
+    geom_density(data = df_mean_malign, aes(x = .data[[col]], fill = "malignant"), alpha = 0.5) +
+    geom_density(data = df_mean_bening, aes(x = .data[[col]], fill = "benign"), alpha = 0.5) +
+    geom_histogram(data = df_mean_malign, aes(x = .data[[col]], y = ..density..), fill = colors["malignant"], alpha = 0.5) +
+    geom_histogram(data = df_mean_bening, aes(x = .data[[col]], y = ..density..), fill = colors["benign"], alpha = 0.5) +
+    scale_fill_manual(values = colors, name = "Class") +
+    labs(x = col, y = "Density") +
+    theme_minimal()
+})
+
+gridExtra::grid.arrange(grobs = plots_list, ncol = 5)
+```
+
+Nous pouvons remarquer les hypothèses suivantes :
+
+-   **Radius_mean, perimeter_mean, area_mean, compactess_mean, concavity_mean, concave.points_mean** sont particulièrement liée à une tumeur cancéreuse.
+
+-   **Texture_mean, smoothness_mean, symetry_mean, fractal_dimension_mean** sont un peu moins voir peut reliés à une tumeur cancéreuse.
+
+On ne remarque pas de variables discriminante qui permettrai de distinguer les cas malins/benins.
+
+Cela reste des hypothèses à vérifier par des tests statistiques d'écart des moyennes.
+
+Pour le groupe worst :
+
+```{r, fig.width=20, fig.height=10,fig.align='center'}
+df_worst_malign <- data_malign[, worst_colonnes]
+df_worst_bening <- data_bening[, worst_colonnes]
+
+colors <- c("malignant" = "lightgreen", "benign" = "lightblue")
+
+plots_list <- lapply(worst_colonnes, function(col) {
+  ggplot() +
+    geom_density(data = df_worst_malign, aes(x = .data[[col]], fill = "malignant"), alpha = 0.5) +
+    geom_density(data = df_worst_bening, aes(x = .data[[col]], fill = "benign"), alpha = 0.5) +
+    geom_histogram(data = df_worst_malign, aes(x = .data[[col]], y = ..density..), fill = colors["malignant"], alpha = 0.5) +
+    geom_histogram(data = df_worst_bening, aes(x = .data[[col]], y = ..density..), fill = colors["benign"], alpha = 0.5) +
+    scale_fill_manual(values = colors, name = "Class") +
+    labs(x = col, y = "Density") +
+    theme_minimal()
+})
+
+gridExtra::grid.arrange(grobs = plots_list, ncol = 5)
+```
+
+On peut remarquer les hypothèses suivantes:
+
+-   **Radius_worst, perimeter_worst, area_worst, compactess_worst, concavity_worst, concave.points_worst** sont particulièrement liée à une une tumeur cancéreuse
+
+-   **Texture_worst, smoothness_worst, symetry_worst, fractal_dimension_worst** sont un peu moins voir peut reliés à une tumeur cancéreuse.
+
+Cela reste des hypothèses à vérifier.
+
+Pour le groupe standard error (se) :
+
+```{r, fig.width=20, fig.height=10,fig.align='center'}
+df_se_malign <- data_malign[, se_colonnes]
+df_se_bening <- data_bening[, se_colonnes]
+
+colors <- c("malignant" = "lightgreen", "benign" = "lightblue")
+
+plots_list <- lapply(se_colonnes, function(col) {
+  ggplot() +
+    geom_density(data = df_se_malign, aes(x = .data[[col]], fill = "malignant"), alpha = 0.5) +
+    geom_density(data = df_se_bening, aes(x = .data[[col]], fill = "benign"), alpha = 0.5) +
+    geom_histogram(data = df_se_malign, aes(x = .data[[col]], y = ..density..), fill = colors["malignant"], alpha = 0.5) +
+    geom_histogram(data = df_se_bening, aes(x = .data[[col]], y = ..density..), fill = colors["benign"], alpha = 0.5) +
+    scale_fill_manual(values = colors, name = "Class") +
+    labs(x = col, y = "Density") +
+    theme_minimal()
+})
+
+gridExtra::grid.arrange(grobs = plots_list, ncol = 5)
+```
+
+Nous pouvons remarquer que pour le groupe se les deux densités entre malin et bénin se confonde plus que sur Worst et mean. On peut formuler l'hypothèse que le groupe se caractérise moins le fait d'avoir une tumeur maligne ou beingne.
+
+On remarque quand même une tendance avec des plus importante que d'autre. Une nouvelle question émerge : est-il nécessaire de conserver les trois groupes de caractéristiques (mean, worst, se) pour la modélisation par classification binaire ?
+
+## **1.6 Analyse relations Features\\Features**
+
+Maintenant que nous avons examiné les relations entre la cible (Target) et les caractéristiques (Features), nous pouvons explorer les liens entre ces caractéristiques elles-mêmes. Cela implique une analyse des corrélations entre les variables du même groupe.
+
+```{r, fig.width=20, fig.height=9, fig.align='center'}
+cor_mean <- cor(data_mean)
+cor_worst <- cor(data_worst)
+cor_se <- cor(data_se)
+
+create_heatmap <- function(cor_matrix) {
+  melted_cor <- melt(cor_matrix)
+  ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value, label = round(value, 2))) +
+    geom_tile() +
+    geom_text(color = "black") +  # Ajouter les labels à l'intérieur des carrés
+    scale_fill_gradient(low = "white", high = "blue") +
+    theme_minimal() +
+    labs(title = "Correlation Heatmap")
+}
+
+heatmap_mean <- create_heatmap(cor_mean)
+heatmap_worst <- create_heatmap(cor_worst)
+heatmap_se <- create_heatmap(cor_se)
+heatmap_mean
+```
+
+```{r, fig.width=20, fig.height=9, fig.align='center'}
+heatmap_worst
+```
+
+```{r, fig.width=20, fig.height=9, fig.align='center'}
+heatmap_se
+```
+
+Dans notre analyse, nous avons observé des corrélations élevées (\> 0,9) entre certaines variables, ce qui est logique étant donné la nature des mesures. Par exemple, le périmètre est étroitement lié au rayon et à l'aire d'une tumeur. De plus, nous avons noté une similitude entre les corrélations des différents groupes de variables (mean, worst, et standard error). Pour confirmer cette observation, nous allons maintenant examiner les corrélations au sein de chaque sous-groupe.
+
+```{r, fig.width=20, fig.height=10, fig.align='center'}
+heatmap(cor(dplyr::select(data, -diagnosis)), Colv = TRUE, Rowv = TRUE, col = colorRampPalette(c("blue", "white", "red"))(100))
+
+```
+
+Nous pouvons voir que par un algo de CAH on retrouve les 3 groupes.
+
+```{r, fig.width=20, fig.height=10, fig.align='center'}
+corr_mat <- cor(dplyr::select(data, -diagnosis))
+corrplot(corr_mat, order = "hclust", tl.cex = 1, addrect = 8)
+```
+
+## **1.7 Vérification des hypothèses et tests statistiques**
+
+On pose l'hypothèse nulle suivante :
+
+-   H0_moyenne = Les valeurs moyennes sont égales chez les individus ayant une tumeur cancéreuse et ceux ayant une tumeur non cancéreuse.
+
+Pour ce faire nous allons utiliser un test de student d'égalité des moyenne à deux échantillons. Nous allons verifier si la moyenne entre deux distribution est différente. On veut rejeter cette hypothese. On fixe un seuil alpha = 0.02, on rejet si p_value \< alpha.
+
+```{r}
+table1(dplyr::select(data, -diagnosis),
+       splitby = ~diagnosis_binary,
+       na.rm = FALSE,
+       test = TRUE)
+```
+
+On remarque que l'hypothèse est accepté pour ces variables qui nous sont donc de peu d'interet :
+
+-   fractal_dimension_mean
+
+-   texture_se
+
+-   smoothness_se
+
+-   symmetry_se
+
+-   fractal_dimension_se
+
+## 1.8 PCA
+
+"Nous constatons de fortes corrélations entre les caractéristiques. Cela peut poser problème pour certains modèles de machine learning, notamment la régression logistique. Afin d'atténuer ce problème, nous allons créer deux versions des données : une avec PCA (Analyse en Composantes Principales) et une sans PCA. Nous allons utiliser une PCA afin de visualiser au mieux les données et voir s'il serait possible de catégoriser un individu plus facilement en les projetant dans un espace de dimensions réduit.
+
+Voici une représentation de l'importance de standardiser les données avant d'effectuer une PCA
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+res.pca <- PCA(dplyr::select(data, -c(diagnosis,diagnosis_binary)), scale.unit = F, graph = F, ncp = 7)
+res.pca.scaled <- PCA(scaled_data, scale.unit = T, graph = F, ncp = 7)
+
+p1 <- fviz_eig(res.pca, addlabels = TRUE, ylim = c(0,100))+
+  ggtitle("Données non standardisées")
+
+p2 <- fviz_eig(res.pca.scaled, addlabels = TRUE, ylim = c(0,65))+
+  ggtitle("Données standardisées")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+Nous pouvons remarquer que dans le cas non standartisé la composante 1 explique 98,2% des données alors que dans le cas des données standardisées la première composante explique seulement 44,9% des données.
+
+```{r, fig.width=20, fig.height=10, fig.align='center'}
+summary(res.pca.scaled)
+```
+
+Les deux premières composante principale expliquent 63.368% de la variance. Nous avons besoin de 11 composantes principales afin d'expliquer plus de 95% de la variance et 18 pour expliquer plus de 99% de la variance.
+
+```{r, fig.width=15, fig.height=8, fig.align='center'}
+fviz_pca_ind(res.pca.scaled,
+             geom = "point", # Utiliser des points pour représenter les individus
+             col.ind = data$diagnosis, # Couleur en fonction de la variable de diagnostic
+             palette = c("blue", "red"), # Palette de couleurs pour les groupes
+             addEllipses = TRUE, # Ajouter des ellipses de confiance
+             repel = TRUE, # Eviter le chevauchement des étiquettes
+             legend.title = "Diagnosis" # Titre de la légende
+)
+```
+
+Nous pouvons obesrver qu'il y a une bonne séparation entre les données. Vérifions sur les denstités.
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+pca_df <- as.data.frame(res.pca.scaled$ind$coord)
+pca_df$diagnosis <- data$diagnosis 
+g_pc1 <- ggplot(pca_df, aes(x = Dim.1, fill = diagnosis)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "PC1", fill = "Diagnosis") +
+  theme_minimal()
+
+g_pc2 <- ggplot(pca_df, aes(x = Dim.2, fill = diagnosis)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "PC2", fill = "Diagnosis") +
+  theme_minimal()
+grid.arrange(g_pc1, g_pc2, ncol = 2)
+```
+
+Il semble que nous ayons une excellente séparation des données le long de l'axe principal 1. En projetant un individu sur les deux premières composantes principales, nous pouvons obtenir une idée assez précise de sa classification. Pour encore plus de précision, il serait intéressant de projeter le nouvel individu sur les trois premières composantes, ce qui nous permettrait d'avoir une représentation en trois dimensions et ainsi d'avoir une vue plus complète et détaillée de sa classification.
+
+# 2. Présentation de la régression logistique binaire
+
+La régression logistique est une technique statistique utilisée pour modéliser la relation entre une variable binaire (variable dépendante) et un ensemble de variables indépendantes (variables explicatives). Elle est largement utilisée dans les domaines de la statistique, de l'apprentissage automatique et de l'analyse des données pour la classification et la prédiction.
+
+Voici une présentation générale du fonctionnement de la régression logistique :
+
+**1. Formulation du problème :**
+
+-   La régression logistique est utilisée pour prédire la probabilité qu'un événement se produise (par exemple, un patient développe une maladie, un client achète un produit, etc.).
+-   La variable dépendante (cible) est binaire, prenant généralement les valeurs 0 et 1 (par exemple, oui/non, succès/échec, positif/négatif).
+-   Les variables indépendantes (caractéristiques) peuvent être continues, binaires ou catégorielles.
+
+**Modèle de régression logistique :**
+
+-   Le modèle de régression logistique utilise la fonction logistique (ou sigmoïde) pour modéliser la relation entre les variables indépendantes et la probabilité de succès.
+-   La fonction logistique transforme la somme pondérée des variables explicatives en une probabilité comprise entre 0 et 1.
+-   La forme de la fonction logistique est : $$ P(Y=1|X) = \frac{1}{1 + e^{-(\beta_0 + \beta_1X_1 + \beta_2X_2 + ... + \beta_pX_p)}} $$
+-   Les coefficients $\beta$ représentent les effets des variables indépendantes sur la probabilité de succès.
+
+**Estimation des coefficients :**
+
+-   Les coefficients $\beta$ sont estimés à partir des données d'entraînement à l'aide de techniques d'optimisation telles que la méthode du maximum de vraisemblance ou des méthodes d'optimisation numérique.
+-   L'objectif est de trouver les valeurs de $\beta$ qui maximisent la vraisemblance des données observées.
+
+**Interprétation des coefficients :**
+
+-   Les coefficients $\beta$ indiquent comment chaque variable indépendante affecte logaritmiquement la probabilité de succès.
+-   Une augmentation d'une unité dans une variable indépendante est associée à un changement multiplicatif de l'odds ratio correspondant.
+
+**Évaluation du modèle :**
+
+-   Les performances du modèle de régression logistique peuvent être évaluées à l'aide de diverses mesures telles que l'exactitude, la sensibilité, la spécificité, l'AUC-ROC, etc.
+-   Le modèle peut également être validé en utilisant des techniques de validation croisée pour évaluer sa capacité à généraliser sur de nouvelles données.
+
+**Application du modèle :**
+
+-   Une fois que le modèle est construit et validé, il peut être utilisé pour prédire la probabilité de succès pour de nouvelles observations.
+-   La probabilité prédite peut être convertie en une décision binaire en utilisant un seuil de classification approprié.
+
+En résumé, la régression logistique est une méthode puissante pour modéliser les relations entre des variables explicatives et une variable binaire cible. Elle est largement utilisée dans de nombreux domaines pour la classification et la prédiction, offrant à la fois une interprétabilité des coefficients et une bonne performance prédictive.
+
+Pour évaluer les perfomances de classification du modèle logistique linéaire, nous avons à disposition plusieurs mesures. Nous les verrons au moment de leur application.
+
+# **3. Imputation**
+
+## **3.1 Génération de valeurs manquantes**
+
+Nous utilisons la fonction prodNA pour créer un nouveau jeu de données à partir du précédent, en y introduisant aléatoirement des valeurs manquantes parmis les variables features. Le paramètre **noNA** représente la proportion de valeurs manquantes.
+
+```{r}
+data_features <- dplyr::select(data , -c(diagnosis_binary, diagnosis))
+
+#5% de valeures manquantes dans le tableau de données
+data_missing_5 <- prodNA(data_features, noNA = 0.05)
+
+#10% de valeures manquantes dans le tableau de données
+data_missing_10 <- prodNA(data_features, noNA = 0.1)
+
+#15% de valeures manquantes dans le tableau de données
+data_missing_15 <- prodNA(data_features, noNA = 0.15)
+
+data_missing_5$diagnosis <- data$diagnosis
+data_missing_10$diagnosis <- data$diagnosis
+data_missing_15$diagnosis <- data$diagnosis
+data_missing_5$diagnosis_binary <- data$diagnosis_binary
+data_missing_10$diagnosis_binary <- data$diagnosis_binary
+data_missing_15$diagnosis_binary <- data$diagnosis_binary
+```
+
+On regarde le nombres de données qui ont été supprimée par la methode MCAR.
+
+*Taux de 5% de valeurs manquantes dans l’ensemble des valeurs du tableau de données*
+
+```{r}
+missing_percentages_5 <- mean(colMeans(is.na(data_missing_5)) * 100)
+missing_percentages_10 <- mean(colMeans(is.na(data_missing_10)) * 100)
+missing_percentages_15 <- mean(colMeans(is.na(data_missing_15)) * 100)
+
+missing_data_summary <- data.frame(
+  Dataset = c("data_missing_5", "data_missing_10", "data_missing_15"),
+  Missing_Percentage = c(missing_percentages_5, missing_percentages_10, missing_percentages_15)
+)
+
+
+kable(t(missing_data_summary), caption = "Tableau des données") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+missing_data <- data.frame(
+  variable = names(data_missing_5),
+  missing_count = colSums(is.na(data_missing_5))
+)
+ggplot(missing_data, aes(x = reorder(variable, -missing_count), y = missing_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Nombre de valeurs manquantes par variable 5%",
+       x = "Variables",
+       y = "Nombre de valeurs manquantes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+*Taux de 10% de valeurs manquantes dans l’ensemble des valeurs du tableau de données*
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+missing_data <- data.frame(
+  variable = names(data_missing_10),
+  missing_count = colSums(is.na(data_missing_10))
+)
+ggplot(missing_data, aes(x = reorder(variable, -missing_count), y = missing_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Nombre de valeurs manquantes par variable 10%",
+       x = "Variables",
+       y = "Nombre de valeurs manquantes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+*Taux de 15% de valeurs manquantes dans l’ensemble des valeurs du tableau de données*
+
+```{r, fig.width=10, fig.height=6, fig.align='center'}
+missing_data <- data.frame(
+  variable = names(data_missing_15),
+  missing_count = colSums(is.na(data_missing_15))
+)
+ggplot(missing_data, aes(x = reorder(variable, -missing_count), y = missing_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Nombre de valeurs manquantes par variable",
+       x = "Variables",
+       y = "Nombre de valeurs manquantes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Pour éviter de supprimer des individus ayant des valeurs manquantes dans leurs données, nous utilisons des techniques d'imputation. En effet, supprimer ces individus réduirait considérablement la taille de l'échantillon et rendrait le jeu de données moins représentatif. C'est pourquoi nous utilisons deux techniques d'imputation, à savoir la moyenne et le k-NN (plus proches voisins), pour remplacer les données manquantes par des valeurs substituées.
+
+-   **La technique d'imputation par la moyenne** : Elle consiste à remplacer chaque valeur manquante par la moyenne de cette variable pour tous les autres cas. Pour mettre en œuvre cette méthode en R, on peut utiliser la fonction `impute_mean` du package **missMethods** avec comme paramètre : `type = "columnwise"`.
+
+-   **La technique d'imputation par les k plus proches voisins** : Cette technique utilise la moyenne des valeurs des k observations les plus proches dans l'espace des variables afin de remplacer la valeur manquante. Pour mettre en œuvre cette méthode en R, on peut utiliser la fonction `kNN` du package **VIM** avec comme paramètre : `k = 5`.
+
+    **critères de qualité** :
+
+-   **RMSE** (Root Mean Squared Error), ou erreur quadratique moyenne, mesure la différence moyenne entre les valeurs imputées (prédites par le modèle) et les valeurs réelles. Il fournit une estimation de la capacité du modèle à prédire la valeur cible, ce qui reflète sa précision. Une valeur plus basse de RMSE indique une technique d'imputation plus précise, où les valeurs imputées sont plus proches des valeurs réelles.
+
+On utilise donc la fonction : `rmse <- sqrt(mean((imputed_values - actual_values)^2))`
+
+-   **MAE** (Mean Absolute Error) ou erreur absolue moyenne mesure la moyenne des valeurs absolues des différences entre les valeurs imputées et les valeurs réelles. Une MAE plus petite indique une meilleure performance de la technique d'imputation, car cela signifie que les valeurs imputées sont plus proches des valeurs réelles.
+
+On utilise la fonction : `mae <- mean(abs(imputed_values - actual_values))`
+
+-   **coefficient de détermination R2** indique la proportion de la variabilité de la variable dépendante qui est expliquée par le modèle de régression. Plus R2 se rapproche de 1, meilleure est la technique d'imputation, car cela signifie que le modèle parvient à expliquer une plus grande partie de la variabilité de la variable dépendante.
+
+On calculera le score R2 à l'aide de la formule suivante : $$
+R2 = 1 - \frac{SRC}{SCR}
+$$
+
+avec :
+
+-   SCT représente la variation totale des valeurs de $y$ par rapport à leur moyenne.
+
+-   SCR représente la variation non expliquée par le modèle (résiduelle), c'est-à-dire la somme des carrés des différences entre les valeurs observées $y_{i}$et les valeurs prédites $\hat{y_{i}}$​.
+
+    $\bar{y} = \frac{1}{n} \sum_{i=1}^{n}y_{i}$
+
+    $SCT = \sum_{i=1}^{n}(y_{i} - \bar{y})^{2}$
+
+    $SCR = \sum_{i=1}^{n}(y_{i} - \hat{y_{i}})^{2}$
+
+```{r}
+library(VIM)
+library(missMethods)
+
+data_impute_knn_5 <- kNN(data_missing_5, k = 5)[,(1:32)]
+colnames(data_impute_knn_5) <- gsub("_imp$", "", colnames(data_impute_knn_5))
+data_impute_knn_10 <- kNN(data_missing_10, k = 5)[,(1:32)]
+colnames(data_impute_knn_10) <- gsub("_imp$", "", colnames(data_impute_knn_10))
+data_impute_knn_15 <- kNN(data_missing_15, k = 5)[,(1:32)]
+colnames(data_impute_knn_15) <- gsub("_imp$", "", colnames(data_impute_knn_15))
+
+
+data_impute_moyenne_10 <- impute_mean(data_missing_10, type = "columnwise", convert_tibble = TRUE)
+data_impute_moyenne_15 <- impute_mean(data_missing_15, type = "columnwise", convert_tibble = TRUE)
+data_impute_moyenne_5 <- impute_mean(data_missing_5, type = "columnwise", convert_tibble = TRUE)
+```
+
+On vérifie si il y a des valeurs manquantes
+
+```{r, echo = FALSE, fig.width=25, fig.height=8, fig.align='center'}
+# Créer les graphiques pour chaque jeu de données
+plot_missing_data <- function(data, title) {
+  missing_data <- data.frame(
+    variable = names(data),
+    missing_count = colSums(is.na(data))
+  )
+  
+  p <- ggplot(missing_data, aes(x = reorder(variable, -missing_count), y = missing_count)) +
+    geom_bar(stat = "identity", fill = "skyblue") +
+    labs(title = title,
+         x = "Variables",
+         y = "Nombre de valeurs manquantes") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(p)
+}
+
+# Créer les graphiques pour chaque jeu de données imputées
+plot_mean_5 <- plot_missing_data(data_impute_moyenne_5, "Nombre de valeurs manquantes - Imputation moyenne (5%)")
+plot_mean_10 <- plot_missing_data(data_impute_moyenne_10, "Nombre de valeurs manquantes - Imputation moyenne (10%)")
+plot_mean_15 <- plot_missing_data(data_impute_moyenne_15, "Nombre de valeurs manquantes - Imputation moyenne (15%)")
+plot_knn_5 <- plot_missing_data(data_impute_knn_5, "Nombre de valeurs manquantes - Imputation k-NN (5%)")
+plot_knn_10 <- plot_missing_data(data_impute_knn_10, "Nombre de valeurs manquantes - Imputation k-NN (10%)")
+plot_knn_15 <- plot_missing_data(data_impute_knn_15, "Nombre de valeurs manquantes - Imputation k-NN (15%)")
+
+# Organiser les graphiques côte à côte avec grid.arrange
+grid.arrange(plot_mean_5, plot_mean_10, plot_mean_15, plot_knn_5, plot_knn_10, plot_knn_15,
+             nrow = 2, ncol = 3, top = "Comparaison du nombre de valeurs manquantes par méthode d'imputation")
+
+```
+
+Il n'y a pas de valeurs manquantes.
+
+Nous pouvons à présent analyser la capacité de chacunes des méthodes avec les metriques enoncées précédement.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+library(Metrics)
+calculate_R2 <- function(actual, predicted) {
+  ss_residual <- sum((actual - predicted)^2)
+  ss_total <- sum((actual - mean(actual))^2)
+  r2 <- 1 - (ss_residual / ss_total)
+  return(r2)
+}
+evaluate_imputation <- function(actual_data, imputed_data) {
+  cols <- intersect(names(actual_data), names(imputed_data))
+  actual_complete <- na.omit(actual_data[, cols])
+  imputed_complete <- na.omit(imputed_data[, cols])
+
+  mae_values <- numeric(length(cols))
+  rmse_values <- numeric(length(cols))
+  r2_values <- numeric(length(cols))
+  
+  for (i in seq_along(cols)) {
+    col <- cols[i]
+    mae_values[i] <- mae(actual_complete[[col]], imputed_complete[[col]])
+    rmse_values[i] <- rmse(actual_complete[[col]], imputed_complete[[col]])
+    r2_values[i] <- calculate_R2(actual_complete[[col]], imputed_complete[[col]])
+  }
+  return (c(MAE = mean(mae_values), RMSE = mean(rmse_values), R2 = mean(r2_values)))
+}
+
+
+data_actual <- dplyr::select(data, -c(diagnosis_binary, diagnosis))
+data_predicted_mean <- dplyr::select(data_impute_moyenne_15, -c(diagnosis_binary, diagnosis))
+data_predicted_knn <- dplyr::select(data_impute_knn_15, -c(diagnosis_binary, diagnosis))
+
+metrics_mean <- evaluate_imputation(data_actual, data_predicted_mean)
+metrics_knn <- evaluate_imputation(data_actual, data_predicted_knn)
+
+results <- data.frame(
+  Method = c("Mean Imputation", "k-NN Imputation"),
+  MAE = c(metrics_mean["MAE"], metrics_knn["MAE"]),
+  R2 = c(metrics_mean["R2"], metrics_knn["R2"]),
+  RMSE = c(metrics_mean["RMSE"], metrics_knn["RMSE"])
+)
+kable(results, caption = "Tableau des données") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+```
+
+Pour garantir que la performance de la méthode kNN est véritablement supérieure à celle de la méthode de la moyenne, il est essentiel de répéter l'expérience un grand nombre de fois afin de s'assurer que les résultats obtenus ne sont pas dus au hasard. Ici, nous avons effectué seulement deux essais en raison de la durée du processus, mais même avec 100 essais, les résultats confirment que kNN offre une meilleure performance.
+
+```{r}
+Simulation <- function(N) {
+
+metrics_mean_5 <- c(0, 0,0)
+metrics_mean_10 <- rep(0, 3)
+metrics_mean_15 <- rep(0, 3)
+metrics_knn_5 <- c(0,0,0)
+metrics_knn_10 <- rep(0, 3)
+metrics_knn_15 <- rep(0, 3)
+
+for (i in 1:N) {
+  
+data_impute_knn_5_1 <- kNN(data_missing_5, k = 5)[,(1:32)]
+colnames(data_impute_knn_5_1) <- gsub("_imp$", "", colnames(data_impute_knn_5_1))
+data_impute_knn_10_1 <- kNN(data_missing_10, k = 5)[,(1:32)]
+colnames(data_impute_knn_10_1) <- gsub("_imp$", "", colnames(data_impute_knn_10_1))
+data_impute_knn_15_1 <- kNN(data_missing_15, k = 5)[,(1:32)]
+colnames(data_impute_knn_15_1) <- gsub("_imp$", "", colnames(data_impute_knn_15_1))
+
+
+data_impute_moyenne_10_1 <- impute_mean(data_missing_10, type = "columnwise", convert_tibble = TRUE)
+data_impute_moyenne_15_1 <- impute_mean(data_missing_15, type = "columnwise", convert_tibble = TRUE)
+data_impute_moyenne_5_1 <- impute_mean(data_missing_5, type = "columnwise", convert_tibble = TRUE)
+
+metrics_mean_5 <- metrics_mean_5 + evaluate_imputation(data_actual, data_impute_moyenne_5_1)
+metrics_mean_10 <- metrics_mean_10 + evaluate_imputation(data_actual, data_impute_moyenne_10_1)
+metrics_mean_15 <- metrics_mean_15 + evaluate_imputation(data_actual, data_impute_moyenne_15_1)
+
+metrics_knn_5 <- metrics_knn_5 + evaluate_imputation(data_actual, data_impute_knn_5_1)
+metrics_knn_10 <- metrics_knn_10 + evaluate_imputation(data_actual, data_impute_knn_10_1)
+metrics_knn_15 <- metrics_knn_15 + evaluate_imputation(data_actual, data_impute_knn_15_1)
+}
+metrics_mean_5 <- metrics_mean_5 / N
+metrics_mean_10 <- metrics_mean_10 / N
+metrics_mean_15 <- metrics_mean_15 / N
+metrics_knn_5 <- metrics_knn_5 / N
+metrics_knn_10 <- metrics_knn_10 / N
+metrics_knn_15 <- metrics_knn_15 / N
+
+
+results <- data.frame(
+  Method = c("Mean Imputation 5%", "Mean Imputation 10%", "Mean Imputation 15%", "k-NN Imputation 5%", "k-NN Imputation 10%", "k-NN Imputation 15%"),
+  MAE = c(metrics_mean_5["MAE"], metrics_mean_10["MAE"], metrics_mean_15["MAE"], metrics_knn_5["MAE"], metrics_knn_10["MAE"], metrics_knn_15["MAE"]),
+  R2 = c(metrics_mean_5["R2"], metrics_mean_10["R2"], metrics_mean_15["R2"], metrics_knn_5["R2"], metrics_knn_10["R2"], metrics_knn_15["R2"]),
+  RMSE = c(metrics_mean_5["RMSE"], metrics_mean_10["RMSE"], metrics_mean_15["RMSE"], metrics_knn_5["RMSE"], metrics_knn_10["RMSE"],  metrics_knn_15["RMSE"])
+)
+
+kable(results, caption = "Récap perfomance 100 itérations") %>%
+  kable_styling(fixed_thead = FALSE,wraptable_width = "0pt")
+}
+
+Simulation(2)
+```
+
+Nous pouvons bien observer que les metriques sont bien mieux dans le cas de la méthode KNN c'est donc celle la que nous allons utiliser dans la suite de notre étude.
+
+# 4. Régression Logistique
+
+Pour utiliser un algorithme d'apprentissage, il est nécessaire de diviser le jeu de données en deux parties : un ensemble de données d'apprentissage et un ensemble de données de test. En effet, il n'est pas judicieux de tester le modèle sur des données déjà rencontrées pendant l'entraînement, car cela ne fournit pas une évaluation robuste de sa capacité à généraliser à de nouveaux exemples.
+
+Nous avons les 7 jeux de données suivant :
+
+-   data
+
+-   data_impute_knn_5
+
+-   data_impute_knn_10
+
+-   data_impute_knn_15
+
+-   data_missing_5
+
+-   data_missing_10
+
+-   data_missing_15
+
+## **4.1 Split des jeux de données**
+
+Nous allons appliquer le modèle de classification à chacun des ensembles de données suivants. Pour ce faire, nous devons diviser chaque ensemble en ensembles d'apprentissage et de test, en utilisant un ratio de 80% pour l'apprentissage et 20% pour le test.
+
+```{r}
+split_data <- function(data, test_size = 0.2, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  n <- nrow(data)
+  test_rows <- round(test_size * n)
+  test_indices <- sample(1:n, test_rows, replace = FALSE)
+  train_set <- data[-test_indices, ]
+  test_set <- data[test_indices, ]
+  return(list(train = dplyr::select(train_set, -c(diagnosis)), test = dplyr::select(test_set, -c(diagnosis))))
+}
+data_split <- split_data(data, test_size = 0.2, seed = 123)
+data_train <- data_split$train
+data_test <- data_split$test
+
+data_impute_knn_5_split <- split_data(data_impute_knn_5, test_size = 0.2, seed = 123) 
+data_impute_knn_5_train <- data_impute_knn_5_split$train
+data_impute_knn_5_test <- data_impute_knn_5_split$test
+  
+data_impute_knn_10_split <- split_data(data_impute_knn_10, test_size = 0.2, seed = 123)
+data_impute_knn_10_train<- data_impute_knn_10_split$train
+data_impute_knn_10_test <- data_impute_knn_10_split$test
+
+data_impute_knn_15_split <- split_data(data_impute_knn_15, test_size = 0.2, seed = 123)
+data_impute_knn_15_train<- data_impute_knn_15_split$train
+data_impute_knn_15_test <- data_impute_knn_15_split$test
+
+data_missing_5_split <- split_data(data_missing_5, test_size = 0.2, seed = 123)
+data_missing_5_train<- data_missing_5_split$train
+data_missing_5_test <- data_missing_5_split$test
+
+data_missing_10_split <- split_data(data_missing_10, test_size = 0.2, seed = 123)
+data_missing_10_train<-data_missing_10_split$train
+data_missing_10_test <- data_missing_10_split$test
+
+data_missing_15_split <- split_data(data_missing_15, test_size = 0.2, seed = 123)
+data_missing_15_train<-data_missing_15_split$train
+data_missing_15_test <- data_missing_15_split$test
+```
+
+Verifions les dimensions de ces datasets
+
+```{r}
+datasets <- list(
+  data_train = data_train,
+  data_test = data_test,
+  data_impute_knn_5_train = data_impute_knn_5_train,
+  data_impute_knn_5_test = data_impute_knn_5_test,
+  data_impute_knn_10_train = data_impute_knn_10_train,
+  data_impute_knn_10_test = data_impute_knn_10_test,
+  data_impute_knn_15_train = data_impute_knn_15_train,
+  data_impute_knn_15_test = data_impute_knn_15_test,
+  data_missing_5_train = data_missing_5_train,
+  data_missing_5_test = data_missing_5_test,
+  data_missing_10_train = data_missing_10_train,
+  data_missing_10_test = data_missing_10_test,
+  data_missing_15_train = data_missing_15_train,
+  data_missing_15_test = data_missing_15_test
+)
+for (name in names(datasets)) {
+  dataset <- datasets[[name]]
+  cat("Dimensions de", name, ":", dim(dataset), "\n")
+}
+```
+
+## 4.2 Entrainement des modèles
+
+Nous voulons à présent ajuster un modèle glm de classification binaire sur chacun des datasets.
+
+```{r}
+model_data <- glm(diagnosis_binary ~ ., data = data_train, family = binomial())
+model_knn_5 <- glm(diagnosis_binary ~ ., data = data_impute_knn_5_train, family = binomial())
+model_knn_10 <- glm(diagnosis_binary ~ ., data = data_impute_knn_10_train, family = binomial())
+model_knn_15 <- glm(diagnosis_binary ~ ., data = data_impute_knn_15_train, family = binomial())
+model_missing_5 <- glm(diagnosis_binary ~ ., data = data_missing_5_train, family = binomial())
+model_missing_10 <- glm(diagnosis_binary ~ ., data = data_missing_10_train, family = binomial())
+model_missing_15 <- glm(diagnosis_binary ~ ., data = data_missing_15_train, family = binomial())
+```
+
+Nous nous rendons compte que sur l'apprentissage du jeu de données entier, comprenant les 30 variables, les résultats des odds ratios et des intervalles de confiance ne sont pas très concluants. Nous allons donc nous concentrer sur les différents groupes : mean, worst, et se.
+
+```{r}
+model_data <- glm(diagnosis_binary ~ ., data = data_train, family = binomial())
+model_data_mean <- glm(diagnosis_binary ~ ., data = data_train[, mean_colonnes], family = binomial())
+model_data_worst <- glm(diagnosis_binary ~ ., data = data_train[, worst_colonnes], family = binomial())
+model_data_se <- glm(diagnosis_binary ~ ., data = data_train[, se_colonnes], family = binomial())
+```
+
+## 4.3 Analyse des modèles
+
+Utilisons la librairie **broom** permettant de retourner le summary détaillé d'un model comprenant :
+
+1.  **Estimation des coefficients** :
+    -   L'estimation des coefficients représente les valeurs estimées qui quantifient la relation entre les variables indépendantes (explicatives) et la variable dépendante (diagnosis).
+    -   Chaque coefficient correspond à l'effet présumé d'une variable indépendante sur la probabilité du résultat de la variable dépendante, tout en tenant compte des autres variables dans le modèle.
+2.  **P-valeur** :
+    -   La p-valeur est une mesure de la fiabilité de chaque coefficient estimé dans le modèle.
+    -   Elle indique la probabilité que le coefficient soit nul (c'est-à-dire qu'il n'y ait pas d'effet de la variable sur la variable réponse) si l'effet observé était dû au hasard.
+    -   Une p-valeur faible (généralement \< 0.05) suggère que le coefficient est probablement différent de zéro et donc significatif dans le modèle.
+3.  **Intervalle de confiance** :
+    -   L'intervalle de confiance entoure chaque estimation de coefficient et fournit une fourchette de valeurs plausibles dans lesquelles le vrai coefficient pourrait se trouver.
+    -   Il exprime la certitude statistique avec laquelle nous pouvons dire que le vrai coefficient se situe dans cet intervalle.
+4.  **Rapport de cotes (Odds Ratio)** :
+    -   Le rapport de cotes est une mesure de l'effet de chaque variable indépendante sur la variable dépendante dans un modèle de régression logistique.
+    -   Il représente le changement relatif dans les chances (odds) de l'événement à prédire associé à un changement unitaire dans la variable explicative, toutes choses étant égales par ailleurs.
+    -   Un odds ratio supérieur à 1 indique une augmentation des chances de l'événement, tandis qu'un odds ratio inférieur à 1 indique une diminution des chances.
+
+En résumé, dans le cadre d'une analyse de régression logistique généralisée (GLM), ces termes nous aident à comprendre l'importance et l'impact des variables indépendantes sur la variable dépendante, ainsi que la fiabilité des estimations de modèle. Les p-valeurs et les intervalles de confiance nous aident à évaluer la significativité statistique des coefficients estimés, tandis que les rapports de cotes nous permettent de quantifier l'effet des variables sur les chances de l'événement étudié. Ces concepts sont fondamentaux pour interpréter les résultats d'un modèle GLM et tirer des conclusions en matière d'analyse statistique.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(as.data.frame(tidy(model_data, conf.int = T, exponentiate = T)), caption = "Summary of Model") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+On a donc ici l'analyse du modèle **`model_data`** entraîné sur les données initiales sur les 30 variables. On peut retrouver les odds ratios dans la colonne "estimate". C'est **`exp(paramètre estimé)`**. On peut aussi retrouver leur p-valeur et leurs intervalles de confiance, **`exp(IC_low paramètre)`**. On peut analyser les odds ratios, mais ici on remarque que ce n'est pas significatif. En effet, la p-valeur est de 0,99, ce qui est supérieur à 0,05 pour tous les paramètres. On ne peut donc pas les analyser par manque de significativité. Les résultats sur l'entrainement sur l'ensemble des feature n'est pas concluente on va donc comme mentionné plus haut nous interresser à chacun des groupe :
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(as.data.frame(tidy(model_data_mean, conf.int = T, exponentiate = T)), caption = "Summary of Model mean") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+kable(as.data.frame(tidy(model_data_worst, conf.int = T, exponentiate = T)), caption = "Summary of Model worst") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(as.data.frame(tidy(model_data_se, conf.int = T, exponentiate = T)), caption = "Summary of Model se") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+Les résultats des odds ratios sont de meilleure qualité et sont surtout exploitables. En effet, ils présentent une p-value inférieure à 0,05 pour pas mal de variables.
+
+Exemple d'interprétation des odd ratios :
+
+Maligne = 1, Bening = 0
+
+-   Pour compactess_se on a **p_value \< 0.05** donc resultat significatif. On a une odd ratios de **2.17e+29\>1** : pour chaque augmentation de 1 unité de compactess_se on a une augmentation de la chance, de likely hood que se soit une tumer de (2.17e+29 - 1)\*100 % que se soit une tumeur maligne
+
+-   Pour aera_se on a bien les valeur significative. On a une odd ratios de **1.45 \> 1** : pour chaque augmentation de 1 unité de aera_se on a une augmentation de la chance, de likely hood que se soit une tumer de (1.45 - 1)\*100 % que se soit une tumeur maligne
+
+Si nous avions une valeur d'odd ratio inferieure à 1 on aurait la même phrase mais avec diminution. De plus on peut aussi analyser les parametre estimé par vraissemblance en enlevant l'option `exponentiate = T`
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(as.data.frame(tidy(model_data_mean, conf.int = T, exponentiate = F)), caption = "Summary of Model mean") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+## 4.4 Analyse de la performance
+
+Pour évaluer les perfomances de classification du modèle logistique, nous avons à disposition plusieurs mesures.
+
+-   **Taux de bonne prédictions** : Cette mesure correspond à la proportion d'observations correctement prédites par le modèle.
+
+    La formule associées est : $\frac{\text{Nombre d'obs bien classées}}{\text{Nombre total d'obs}}$
+
+-   **Taux de bonne prédictions pour les valeurs 0 et 1** : Cette mesure correspond à la précision du modèle pour prédire chaque classe (0, 1). C'est la proportion d'obesrvation de la classe $i$ qui ont été correctement prédites par le modèle.
+
+    La formule associée pour 1 est : $\frac{\text{Nombre de Vrais Positifs}}{\text{Nombre total d'obs de classe 1}}$
+
+-   **Spécificité** : La spécificité d'un modèle est la capacité du modèle à identifier correctement les exemples négatifs (vrais négatifs) parmi tous les exemples qui sont réellement négatifs. En d'autres termes, la spécificité mesure la proportion d'exemples négatifs réels (classe 0) que le modèle prédit correctement comme négatifs. Une spécificité élevée indique que le modèle est capable de classifier efficacement les cas négatifs.
+
+    La formule pour calculer la spécificité est :
+
+    **Spécificité** $=\frac{\text{Vrai négatifs}}{\text{Faux positifs} + \text{Vrai négatifs}}$
+
+-   **Recall (Sensibilité)** : Le recall, également appelé sensibilité ou taux de vrais positifs, mesure la capacité d'un modèle à identifier correctement les exemples positifs parmi tous les exemples qui sont réellement positifs.
+
+    Le recall est calculé comme
+
+    **Recall** $=\frac{\text{Vrai positifs}}{\text{Faux négatif} + \text{Vrai positifs}}$
+
+    Le recall est important lorsque la détection des vrais positifs est critique, par exemple dans notre cas le diagnostic d'une tumeur cancéreuse est primordial.
+
+-   **Courbe ROC (Receiver Operating Characteristic)** : La courbe ROC est un graphique représentant la relation entre la sensibilité (taux de vrais positifs) et la spécificité (taux de faux positifs) d'un modèle pour différentes valeurs seuil. L'axe des x (abscisses) représente le taux de faux positifs (1 - spécificité). L'axe des y (ordonnées) représente le taux de vrais positifs (sensibilité). Plus la courbe ROC est proche du coin supérieur gauche, meilleure est la capacité du modèle à distinguer entre les deux classes. Une ligne droite diagonale du coin inférieur gauche au coin supérieur droit représenterait une performance aléatoire.
+
+-   **AUC (Area Under the Curve)** : L'AUC mesure la surface sous la courbe ROC. Il donne une mesure agrégée de la performance du modèle sur l'ensemble de la gamme des seuils de probabilité possibles. Une AUC de 0.5 correspond à une performance aléatoire (comme une ligne droite diagonale). Une AUC de 1.0 indique une performance parfaite (la courbe atteint le coin supérieur gauche). L'AUC mesure la capacité du modèle à classer correctement les observations positives et négatives. Une AUC élevée indique une meilleure capacité de discrimination du modèle.
+
+**Hosmer-Lemeshow** donne un critère pour l'AUC :
+
+-   **0.7 ≤ AUC \< 0.8 = "Acceptable discrimination"**
+
+-   **\# 0.8 ≤ AUC \< 0.9 = "Excellent discrimination"**
+
+-   **AUC ≥ 0.9 = "Outstanding discrimination"**
+
+*Hosmer DW, Lemeshow S (2000). Applied logistic regression, 2nd ed. Wiley, pp 156–164*
+
+Pour initier l'analyse, nous allons nous focaliser sur l'évaluation basée sur les taux. Pour cela nous devons calculer la matrice de confusion,
+
+Commencons par initialiser un seuil de décision à 0.5.
+
+Le seuil est utilisé pour classifier les observations de la manière suivante : tous les individus ayant une **`Predicted_Prob > seuil = 0.5`** seront classés positivement (1), tandis que ceux avec **`Predicted_Prob < seuil = 0.5`** seront classés négativement (0).
+
+```{r}
+calculate_performance_metrics <- function(model, threshold, data_train, data_test) {
+    predicted_probabilities_train <- predict(model, newdata = dplyr::select(data_train, -diagnosis_binary), type = "response")
+    predicted_probabilities_test <- predict(model, newdata = dplyr::select(data_test, -diagnosis_binary), type = "response")
+    
+    predicted_classes_train <- ifelse(predicted_probabilities_train > threshold, 1, 0)
+    predicted_classes_test <- ifelse(predicted_probabilities_test > threshold, 1, 0)
+    
+    confusion_matrix_train <- table(data_train$diagnosis_binary, predicted_classes_train)
+    confusion_matrix_test <- table(data_test$diagnosis_binary, predicted_classes_test)
+    
+    accuracy_train <- sum(diag(confusion_matrix_train)) / sum(confusion_matrix_train)
+    accuracy_test <- sum(diag(confusion_matrix_test)) / sum(confusion_matrix_test)
+    
+    sensitivity_train <- confusion_matrix_train[2, 2] / sum(confusion_matrix_train[2, ])
+    sensitivity_test <- confusion_matrix_test[2, 2] / sum(confusion_matrix_test[2, ])
+    specificity_train <- confusion_matrix_train[1, 1] / sum(confusion_matrix_train[1, ])
+    specificity_test <- confusion_matrix_test[1, 1] / sum(confusion_matrix_test[1, ])
+    
+    positive_predictive_value_train <- confusion_matrix_train[2, 2] / sum(predicted_classes_train == 1)
+    positive_predictive_value_test <- confusion_matrix_test[2, 2] / sum(predicted_classes_test == 1)
+    
+    negative_predictive_value_train <- confusion_matrix_train[1, 1] / sum(predicted_classes_train == 0)
+    negative_predictive_value_test <- confusion_matrix_test[1, 1] / sum(predicted_classes_test == 0)
+
+    
+    # Créer le dataframe des résultats
+    results_table <- data.frame(
+      Metric = c(
+        "Accuracy",
+        "Sensitivity",
+        "Specificity",
+        "Positive Predictive Value",
+        "Negative Predictive Value"
+      ),
+      Value_train_set = c(
+        accuracy_train,
+        sensitivity_train,
+        specificity_train,
+        positive_predictive_value_train,
+        negative_predictive_value_train
+      ),
+      Value_test_set = c(
+        accuracy_test,
+        sensitivity_test,
+        specificity_test,
+        positive_predictive_value_test,
+        negative_predictive_value_test
+      )
+    )
+    
+    return(results_table)
+  }
+```
+
+Sur data_train et data_test qui représente le jeu de donnée en entier on a :
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+
+kable(calculate_performance_metrics(model_data,0.5, data_train, data_test), caption = "Performance model data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Nous observons des résultats très prométeurs sur le test set.
+
+Nous pouvons comparer ces resultats avec les modèle entrainés seulement avec le groupe mean, worst et se. Nous appliquons chacun de ces modèles sur le jeu test de donnée entier.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_data_mean,0.5, data_train[, mean_colonnes], data_test), caption = "Performance model data mean") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_data_worst,0.5, data_train[, worst_colonnes], data_test), caption = "Performance model data worst") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_data_se,0.5, data_train[, se_colonnes], data_test), caption = "Performance model data se") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Nous constatons une précision accrue avec le modèle entraîné sur les données 'worst' avec un seuil de décision de 0,5. Le model se est le moins interressant
+
+Explorons maintenant l'effet de l'entraînement sur un jeu de données comportant des valeurs manquantes ou ayant été imputées avec la méthode kNN.
+
+Pour les modèle imputé avec kNN on a :
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_knn_5,0.5, data_impute_knn_5_train, data_test), caption = "Performance KNN 5%") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_knn_10,0.5,data_impute_knn_10_train, data_test), caption = "Performance KNN 10%") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_knn_15, 0.5, data_impute_knn_15_train, data_test), caption = "Performance KNN 15%") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Les résultats que nous observons sont pour le moins inhabituels. Nous constatons en effet de bien meilleures performances avec les modèles **``` model_knn_15,``model_knn_10 ```**, entraîné sur un jeu de données présentant davantage de valeurs manquantes et imputé via la méthode kNN. Cette constatation semble peu logique, car il est surprenant d'obtenir de meilleurs résultats dans de telles circonstances. De plus, nous remarquons qu'il n'y a pas de grandes différences de performances entre les modèles entraînés sur le jeu de données initial et ceux entraînés sur les données imputées ; nous pouvons même observer une légère amélioration. Pour mieux comprendre ces comportements, il serait pertinent de tester les modèles sur un jeu de données de validation de plus grande taille.
+
+Nous pouvons maintenant examiner les résultats obtenus en entraînant les modèles sur des jeux de données présentant différents niveaux de valeurs manquantes :
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_missing_5, 0.5, data_missing_5_train, data_test), caption = "Performance") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_missing_10,0.5, data_missing_10_train, data_test), caption = "Performance") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_missing_15,0.5, data_missing_15_train, data_test), caption = "Performance") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Pour le dernier (model_missing_15) nous obtenons des résultats beaucoup plus bas d'habitude c'est vraiment un coup de chance.
+
+Il n'est guère surprenant que l'entraînement sur un jeu de données comportant des valeurs manquantes entraîne une réduction significative de la précision du modèle. En comparant les cas imputés aux cas avec valeurs manquantes, nous constatons que l'imputation est vraiment une étape cruciale pour éviter la perte de précision du modèle. Ces résultats soulignent l'importance de traiter les valeurs manquantes de manière efficace, et la méthode kNN se révèle être une méthode de qualité dans ce contexte.
+
+Essayons de trouver le seuil optimal de classification afin de maximiser le **Recall/Sensibilité** sans perdre en précision.
+
+Nous observons en moyenne une accuracy de 0,90 et des taux élevés avec un sensibilité moyenne à 0,80 sur le test_set. Ces résultats sont encourageants, suggérant que notre modèle est efficace. Une possibilité pour son amélioration consiste à ajuster le seuil de décision. Une méthode courante pour ce faire est l'utilisation de la courbe ROC.
+
+## 4.5 Amélioration performance ROC
+
+Pendant cette analyse, nous allons nous concentrer sur les modèles ayant les meilleures chances de performer. Nous allons nous intéresser particulièrement aux modèles suivants :
+
+-   Le modèle **`model_data`**, entraîné sur l'ensemble des données.
+
+-   Le modèle **`model_data_mean`**, entraîné sur les données du groupe "mean".
+
+-   Le modèle **`model_data_se`**, entraîné sur les données du groupe "se".
+
+-   Le modèle **`model_data_worst`**, entraîné sur les données du groupe "worst".
+
+-   Le modèle **`model_knn_15`**, afin de voir comment il est possible de l'améliorer, étant donné les exceptionnels résultats quelque peu anormaux qu'il a obtenus précédemment.
+
+Passons à l'analyse de la courbe ROC et de l'AUC.
+
+```{r}
+library(pROC)
+plot_roc_curve <- function(model, data) {
+  predicted_probabilities <- predict(model, dplyr::select(data, -diagnosis_binary), type = "response")
+  true_labels <- data[["diagnosis_binary"]]
+  
+  roc_info <- roc(true_labels, predicted_probabilities)
+  
+  # Créer un dataframe avec les données de la courbe ROC en pourcentage
+  roc_df <- data.frame(
+    True_Pos_Pourcent = roc_info$sensitivities * 100,
+    False_Pos_Pourcent = (1 - roc_info$specificities) * 100,
+    thresholds = roc_info$thresholds
+  )
+  thresholds <- roc_info$thresholds
+  # Ajouter une colonne Recall pour chaque seuil
+  recalls <- sapply(thresholds, function(threshold) {
+    if (threshold == thresholds[1] || threshold == thresholds[length(thresholds)]) {
+    return(-1)
+    }
+    predicted_classes <- ifelse(predicted_probabilities >= threshold, 1, 0)
+    confusion_matrix <- table(true_labels, predicted_classes)
+    recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+    return(recall)
+  })
+  acc <- sapply(thresholds, function(threshold) {
+    if (threshold == thresholds[1] || threshold == thresholds[length(thresholds)]) {
+    return(-1)
+    }
+    predicted_classes <- ifelse(predicted_probabilities >= threshold, 1, 0)
+    confusion_matrix <- table(true_labels, predicted_classes)
+    accu <-sum(diag(confusion_matrix)) / sum(confusion_matrix)
+    return(accu)
+  })
+  
+  roc_df$Recall <- recalls
+  roc_df$Accuracy <- acc
+  
+  optimal_threshold <- coords(roc_info, "best", maximize = "sensitivities")$threshold
+  cat("Seuil optimal pour maximiser le recall :", optimal_threshold, "\n")
+
+  plot(roc_info, 
+       plot = TRUE, 
+       legacy.axes = TRUE,
+       percent = TRUE,
+       xlab = "Pourcentage de Faux Positifs (1 - Spécificité)", 
+       ylab = "Pourcentage de Vrai Positif (Sensitivité)",
+       col = "blue", 
+       lwd = 4, 
+       print.auc = TRUE,
+       print.auc.coords = c(50, 50),
+       main = "Courbe ROC")
+
+  return(roc_df)
+}
+
+```
+
+Pour le modèle : **`model_data`**
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+roc_data <- plot_roc_curve(model = model_data,
+                           data = data_test)
+```
+
+Nous constatons une AUC de 0,896, ce qui, selon le critère de Hosmer-Lemeshow, indique une excellente capacité de discrimination. De plus, l'algorithme nous propose un seuil de 2,980692e-12 pour maximiser la sensibilité. Cette recommandation n'est pas surprenante, car en choisissant le seuil le plus bas possible, nous acceptons davantage de personnes, mais cela entraîne une diminution de la spécificité et de la précision, comme le montre l'analyse ci-dessous.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_data,0.5, data_train, data_test), caption = "Performance model data seuil = 0.5") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(calculate_performance_metrics(model_data,2.980692e-12, data_train, data_test), caption = "Performance model data seuil = 2.98e-12") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+À cette étape, aucun changement significatif de précision n'est observé. Il est donc crucial de travailler en étroite collaboration avec des médecins pour déterminer cette valeur. Cela permettra de choisir le seuil optimal qui équilibre la précision et le rappel (recall). Pour faciliter la prise de décision, il serait utile d'examiner les valeurs de seuils et les différentes métriques dans un tableau.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(roc_data, caption = "Tableau résumé de la ROC") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+Nous pouvons réaliser cette étape pour les autres modèles :
+
+Pour le modèle entrainé sur le groupe mean : **`model_data_mean`**
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+roc_data <- plot_roc_curve(model = model_data_mean,
+                           data = data_test)
+kable(calculate_performance_metrics(model_data_mean,0.5, data_train[, mean_colonnes], data_test), caption = "Performance model data mean seuil = 0.5") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+kable(calculate_performance_metrics(model_data_mean,0.2565712, data_train[, mean_colonnes], data_test), caption = "Performance model data mean seuil = 0.2565712") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Ici, en utilisant le seuil qui maximise le rappel, nous constatons une amélioration des performances de précision du modèle, ainsi qu'une AUC très haute de 0.963 ce qui est très encourageant. De plus, en examinant le tableau ci-dessous, nous constatons que c'est le meilleur seuil pour maximiser à la fois la précision et le rappel. Toutefois, il serait judicieux de consulter un spécialiste pour déterminer si cela répond bien à leurs besoins spécifiques.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(roc_data, caption = "Tableau résumé de la ROC") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+Pour le modèle entrainé sur le groupe worst: **`model_data_worst`**
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+roc_data <- plot_roc_curve(model = model_data_worst,
+                           data = data_test)
+kable(calculate_performance_metrics(model_data_worst,0.5, data_train[, worst_colonnes], data_test), caption = "Performance model data worst seuil = 0.5") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+kable(calculate_performance_metrics(model_data_worst,0.1221249, data_train[, worst_colonnes], data_test), caption = "Performance model data mean seuil = 0.1221249") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Ici, en nous concentrant sur le modèle entraîné sur le groupe 'worst', nous observons des résultats impressionnants. En effet, nous constatons une AUC de 0,96, indiquant une discrimination exceptionnelle. De plus, nous remarquons une augmentation de 4% de la précision et de 5% de la sensibilité. Ainsi, il est actuellement considéré comme le modèle le plus performant.
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(roc_data, caption = "Tableau résumé de la ROC") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+De plus en observant le tableau ci-dessus nous observons que le seuil optimal maximisant l'accuracy et le recall est bien celui mentionné juste au dessus.
+
+Interressons nous maintenant au modèle entrainé sur les donnés imputé knn 15 : **`model_impute_knn_15`**
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+roc_data <- plot_roc_curve(model = model_knn_15,
+                           data = data_test)
+kable(calculate_performance_metrics(model_knn_15,0.5,data_impute_knn_15_train, data_test), caption = "Performance model data worst seuil = 0.5") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+kable(calculate_performance_metrics(model_knn_15,0.9999765, data_impute_knn_15_train, data_test), caption = "Performance model data mean seuil = 0.9999765") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Pour le modèle entrainé sur le groupe se :
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+roc_data <- plot_roc_curve(model = model_data_se,
+                           data = data_test)
+kable(calculate_performance_metrics(model_data_se,0.5, data_train[, se_colonnes], data_test), caption = "Performance model data worst seuil = 0.5") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+kable(calculate_performance_metrics(model_data_se,0.5784544 , data_train[, se_colonnes], data_test), caption = "Performance model data mean seuil = 0.5784544 ") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+kable(roc_data, caption = "Tableau résumé de la ROC") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+Le modèle entraîné sur le groupe 'se' est nettement moins intéressant que ceux entraînés sur les groupes 'mean' ou 'worst'.
+
+# 5. Selection de variables
+
+Cette section vise à mettre en œuvre plusieurs méthodes de sélection de variables afin d'identifier les plus pertinentes pour la modélisation. Compte tenu du grand nombre de variables dans notre jeu de données, les méthodes de réduction de dimensionnalité offrent une solution pour simplifier le processus.
+
+La sélection de variables revêt une importance cruciale dans la modélisation statistique et l'apprentissage automatique. Son objectif est de déterminer les variables les plus significatives pour la prédiction ou l'explication d'une variable cible, tout en réduisant la complexité du modèle. Voici quelques-uns de ses objectifs :
+
+1.  **Amélioration des performances du modèle** : En éliminant les variables non pertinentes ou redondantes, la sélection de variables simplifie le modèle, améliore sa généralisation et réduit le risque de surajustement aux données d'entraînement.
+
+2.  **Réduction du coût de calcul** : En réduisant le nombre de variables, la sélection de variables peut également réduire le temps de calcul nécessaire pour entraîner et utiliser le modèle, ce qui est particulièrement crucial pour les grands ensembles de données.
+
+3.  **Prévention du surajustement** : En éliminant les variables susceptibles d'introduire du bruit ou des corrélations inutiles, la sélection de variables aide à prévenir le surajustement en permettant au modèle de se concentrer sur les informations les plus pertinentes pour la prédiction.
+
+Nous pouvons détecter l'importance des variables grâce aux odds ratios, celles qui sont significatives, comme nous l'avons fait précédemment. En effet :
+
+1.  **Analyse Odds Ratios** : Les odds ratios indiquent comment les chances de l'événement d'intérêt changent avec une unité de changement dans la variable indépendante. Des odds ratios élevés (supérieurs à 1) indiquent une forte association positive entre la variable indépendante et l'événement d'intérêt, tandis que des odds ratios faibles (inférieurs à 1) indiquent une association négative. Les valeurs proches de 1 indiquent une association faible ou nulle.
+
+**Vérifier les intervalles de confiance** : Les intervalles de confiance des odds ratios vous permettent d'évaluer la précision de l'estimation. Des intervalles étroits indiquent une estimation précise, tandis que des intervalles larges indiquent une incertitude plus grande.
+
+Dans cette partie nous allons utiliser des méthodes plus algorithmiques :
+
+La sélection de variables backward, forward et stepwise sont des méthodes utilisées pour sélectionner les variables les plus significatives dans un modèle de régression en utilisant des critères comme l'AIC (criterion d'information d'Akaike) .
+
+-   **Forward selection** : Dans cette méthode, le processus commence sans aucune variable explicative dans le modèle. Les variables sont ensuite ajoutées une par une, en choisissant à chaque étape celle qui améliore le plus le critère d'évaluation (par exemple, l'AIC). Le processus continue jusqu'à ce qu'aucune autre variable ne puisse améliorer davantage le critère d'évaluation.
+
+-   **Backward elimination** : Contrairement à la méthode forward, le processus commence avec toutes les variables explicatives incluses dans le modèle. À chaque étape, la variable la moins significative est retirée du modèle, et le modèle est réajusté. Ce processus se poursuit jusqu'à ce qu'aucune autre variable ne puisse être retirée sans augmenter significativement le critère d'évaluation.
+
+-   **Stepwise selection** : Cette méthode combine les deux approches précédentes. Elle commence avec un modèle vide, puis ajoute ou supprime les variables de manière itérative jusqu'à ce que le critère d'évaluation ne puisse plus être amélioré par l'ajout ou la suppression d'une variable. Dans le cas de la méthode stepwise, les variables sont ajoutées ou supprimées à chaque étape si cela améliore le critère d'évaluation.
+
+L'AIC est un critère d'évaluation largement utilisé dans la sélection de modèle. Il mesure la qualité du modèle en prenant en compte à la fois l'ajustement du modèle et la complexité du modèle. Plus précisément, l'AIC prend en compte la log-vraisemblance du modèle et le nombre de paramètres estimés. L'objectif est de minimiser l'AIC, ce qui équivaut à trouver le modèle qui ajuste bien les données tout en étant le moins complexe possible. Dans le contexte de la sélection de variables, l'AIC est utilisé pour évaluer la qualité des modèles avec différentes combinaisons de variables, et la méthode forward, backward ou stepwise sélectionne le modèle avec le plus faible AIC.
+
+Pour réaliser la selection de variables nous allons utiliser la librairie **MASS** avec sa fonction `stepAIC` .
+
+Appliquons la selection de variables sur le modèle prenant toutes les données
+
+```{r}
+mBack <- stepAIC(model_data, direction = "backward",k = 2, trace = F)
+mForward <- stepAIC(model_data, direction = "forward",k = 2, trace = F)
+mStepWise <- stepAIC(model_data, direction = "both",k = 2, trace = F)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+varBack <- sapply(tail(names(mBack$coefficients), length(mBack$coefficients)-1), function(x){substr(x, 1, nchar(x) )})
+names(varBack) <- NULL
+
+varForw <- sapply(tail(names(mForward$coefficients), length(mForward$coefficients)-1), function(x){substr(x, 1, nchar(x) )})
+names(varForw) <- NULL
+
+varStep <- sapply(tail(names(mStepWise$coefficients), length(mStepWise$coefficients)-1), function(x){substr(x, 1, nchar(x) )})
+names(varStep) <- NULL
+
+donnees <- data.frame(
+  Methode = c("Backward", "Forward", "Stepwise"),
+  Nombre_de_Variables = c(length(mBack$coefficients)-1, length(mForward$coefficients)-1, length(mStepWise$coefficients)-1),
+  Variables_Sélectionnées = c(paste(varBack, collapse=", "), paste(varForw, collapse=", "), c(paste(varStep, collapse=", "))
+))
+
+# Affichage du tableau avec kable
+kable(donnees, caption = "Nombre de variables sélectionnées par méthode avec les variables sélectionnées", align = "c", format = "html") %>%
+  kable_styling(full_width = FALSE)
+```
+
+Nous constatons que les méthodes Backward et Stepwise réduisent considérablement le nombre de variables, le faisant passer de 30 à 10. De plus, ces deux méthodes conservent les mêmes 10 variables. En revanche, la méthode Forward conserve le même nombre de variables que le jeu de données initial, ce qui s'avère donc peu pertinent.
+
+Nous pouvons obesrver la courbe de l'AIC au cours des différents algo :
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+plot(mBack$anova[, "AIC"], type = "b", axes = F, ylab= "AIC", xlab = "", main = "Evolution AIC Backward")
+axis(1, at = 1:length(mBack$anova[, 'Step']), labels = mBack$anova[, 'Step'], las = 2, cex.axis = 0.75)
+```
+
+```{r, fig.width=10, fig.height=8, fig.align='center'}
+plot(mStepWise$anova[, "AIC"], type = "b", axes = F, ylab= "AIC", xlab = "", main = "Evolution AIC StepWise")
+axis(1, at = 1:length(mStepWise$anova[, 'Step']), labels = mStepWise$anova[, 'Step'], las = 2, cex.axis = 0.75)
+```
+
+La dernière étape consiste à verifier la perfomance du nouveau model après la selection de variable.
+
+```{r}
+variables_selected <- varBack
+model_data_final <- glm(diagnosis_binary ~ ., data = data_train[, c("diagnosis_binary", variables_selected)], family = binomial())
+
+kable(calculate_performance_metrics(model_data,2.980692e-12, data_train, data_test), caption = "Performance model initial") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+kable(calculate_performance_metrics(model_data_final,0.5, data_train[, c("diagnosis_binary", variables_selected)], data_test), caption = "Performance model final") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+On a perdu en Recall mais gagné en précision
+
+Nous pouvons de nouveau choisir un seuil avec ROC
+
+```{r}
+roc_data <- plot_roc_curve(model = model_data_final,
+                           data = data_test)
+```
+
+Malheureusement, il n'existe pas de seuil permettant d'augmenter le recall par rapport au modèle initial. Cependant, en réduisant le nombre de variables de 30 à 10, nous parvenons à améliorer la précision. Le problème est que le recall diminue également, et dans notre situation, le recall est un paramètre essentiel.
+
+Essayons de voir si on peut réduire le nombre de variables dans le cas du modèle entrainé sur le groupe worst.
+
+```{r}
+mBack <- stepAIC(model_data_worst, direction = "backward",k = 2, trace = F)
+mForward <- stepAIC(model_data_worst, direction = "forward",k = 2, trace = F)
+mStepWise <- stepAIC(model_data_worst, direction = "both",k = 2, trace = F)
+
+varBack <- sapply(tail(names(mBack$coefficients), length(mBack$coefficients)-1), function(x){substr(x, 1, nchar(x) )})
+names(varBack) <- NULL
+
+varForw <- sapply(tail(names(mForward$coefficients), length(mForward$coefficients)-1), function(x){substr(x, 1, nchar(x) )})
+names(varForw) <- NULL
+
+varStep <- sapply(tail(names(mStepWise$coefficients), length(mStepWise$coefficients)-1), function(x){substr(x, 1, nchar(x) )})
+names(varStep) <- NULL
+
+donnees <- data.frame(
+  Methode = c("Backward", "Forward", "Stepwise"),
+  Nombre_de_Variables = c(length(mBack$coefficients)-1, length(mForward$coefficients)-1, length(mStepWise$coefficients)-1),
+  Variables_Sélectionnées = c(paste(varBack, collapse=", "), paste(varForw, collapse=", "), c(paste(varStep, collapse=", "))
+))
+
+# Affichage du tableau avec kable
+kable(donnees, caption = "Nombre de variables sélectionnées par méthode avec les variables sélectionnées", align = "c", format = "html") %>%
+  kable_styling(full_width = FALSE)
+```
+
+On arrive à en enlever 3. Verfions les perfomance de ce nouveau modèle.
+
+```{r}
+variables_selected <- varBack
+model_data_final <- glm(diagnosis_binary ~ ., data = data_train[, c("diagnosis_binary", variables_selected)], family = binomial())
+
+kable(calculate_performance_metrics(model_data_worst,0.1221249, data_train[, worst_colonnes], data_test), caption = "Performance model initial") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+kable(calculate_performance_metrics(model_data_final,0.5, data_train[, c("diagnosis_binary", variables_selected)], data_test), caption = "Performance model final") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+roc_data <- plot_roc_curve(model = model_data_final,
+                           data = data_test)
+```
+
+```{r}
+kable(calculate_performance_metrics(model_data_final,0.07921032 , data_train[, c("diagnosis_binary", variables_selected)], data_test), caption = "Performance model final") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+On obtient approximativement les même résultats alors que l'on à réduit le nombre de variables.
+
+Pour conclure à l'aide d'un réseau de neurone programmer en python à l'aide de tensorflow avec un apprentissage sur le jeu de données complet nous obtenons les mêmes résultat 96% d'accuracy.
