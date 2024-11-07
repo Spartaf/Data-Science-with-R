@@ -1,0 +1,867 @@
+---
+title: "Projet R ISUP 2023"
+author: "BOS Félix, QUEDEC Julien"
+date: "2024-01-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plotly)
+library(ggplot2)
+library(kableExtra)
+library(knitr)
+library(gridExtra)
+library(ggpubr)
+```
+
+# Partie I - Simulation avec R
+
+**Q1 : Expliquez l'utilité de la fonction set.seed() de R.**
+
+En langage R, la fonction **`set.seed()`** est utilisée pour initialiser la séquence de nombres pseudo-aléatoires générée par les fonctions de génération de nombres aléatoires. Les générateurs de nombres aléatoires dans R sont déterministes, ce qui signifie que si nous fournissons la même graine (seed), nous obtiendrons la même séquence de nombres pseudo-aléatoires à chaque exécution. Cela est utile dans diverses situations, notamment pour assurer la reproductibilité des résultats dans des analyses statistiques, des simulations ou d'autres processus utilisant des éléments aléatoires.
+
+L'utilisation de **`set.seed()`** est particulièrement importante lorsque nous partageons du code ou que nous devons garantir que nos résultats peuvent être reproduits par d'autres personnes. En fixant la graine, nous assurons une cohérence dans les résultats générés par des fonctions aléatoires, ce qui est essentiel pour la reproductibilité et la vérification des résultats.
+
+Fixons la graine avec la valeur 42
+
+```{r}
+set.seed(42)
+```
+
+Dans cet exemple, la valeur **42** est choisie arbitrairement comme graine. Nous pouvons choisir n'importe quelle valeur numérique pour la graine. Notons que la valeur spécifiée dans **`set.seed()`** est importante pour reproduire exactement la même séquence de nombres aléatoires. Si nous utilisons une graine différente, la séquence générée sera également différente.
+
+**Q2 : Donnez une fonction permettant de générer un tirage aléatoire de valeurs distribuées selon une loi Gaussienne** $\mathcal{N}(0, 1)$
+
+$$
+\begin{align*}  f(x) = \frac{1}{\sqrt{2\pi}} e^{-\frac{x^2}{2}}\end{align*}
+$$
+
+```{r, echo = F, fig.width=12, fig.height=6, fig.align='center'}
+
+# Création de l'abscisse avec 1000 valeurs afin d'avoir une courbe lisse
+x_values <- seq(-3, 3, length.out = 1000)
+# Application de la fonction gaussienne avec une moyenne de 0 et un écart type de 1
+y_values <- dnorm(x_values, mean = 0, sd = 1)
+
+# Affichage de la Gaussienne sous ggplot2
+ggplot(data.frame(x = x_values, y = y_values), aes(x, y)) +
+  geom_line(color = "lightblue", linewidth = 2) +
+  labs(title = "Distribution Gaussienne Standard",
+       x = "Valeurs",
+       y = "Densité de probabilité") +
+  theme_minimal()
+```
+
+Voici la commande de tirage de 30 valeurs suivant $\mathcal{N}(0, 1)$
+
+```{r}
+# Tirage de 30 valeurs suivant une loi normale 
+nrandom_values <- rnorm(30, mean = 0, sd = 1)
+# Création d'un dataframe des valeurs générées
+normal_df <- data.frame(values = nrandom_values)
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Affichage avec kable du dataframe à l'aide de la fonction head qui affiche les premiere valeurs
+kable(t(head(normal_df,n = 7)), caption = "Tableau des 7 premières valeurs du tirage") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Vérifions les paramètres de distribution du vecteur généré :
+
+```{r}
+# Calcul des différents paramètres 
+mean_value <- mean(nrandom_values)
+sd_value <- sd(nrandom_values)
+variance_value <- var(nrandom_values)
+
+# Création d'un data.frame avec les statistiques
+stats_df <- data.frame(
+  Statistique = c("Moyenne", "Écart-type", "Variance"),
+  Valeur = c(mean_value, sd_value, variance_value)
+)
+
+# Utilisation de kable pour afficher le tableau
+kable((stats_df), caption = "Statistiques du vecteur généré") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Nous constatons ainsi une moyenne approximativement égale à zéro et un écart type qui se rapproche de 1. Étant donné que nous disposons seulement de 30 valeurs, à mesure que leur nombre augmente, la moyenne aura tendance à converger vers 0 et l'écart type à converger vers 1. Car le tirage suis une loi normale centrée réduite.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Affichage de l'histogramme et de la courbe de densité du dataframe des valeurs généré.
+ggplot(normal_df, aes(x = values)) +
+  # Histogramme
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"),
+                 bins = 10, 
+                 color = "black", 
+                 alpha = 0.5) +
+  # Ajout de la densité généré à partir de l'échantillon
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), 
+               alpha = 0.3, 
+               linewidth = 1) +
+  # Ajout de la densité théorique N(0,1)
+  stat_function(fun = dnorm, 
+                args = list(mean = mean_value, sd = sd_value), 
+                aes(color = "Densité théorique"), 
+                linewidth = 1, 
+                linetype = "dashed") +
+  # Ajout du titre et de l'esthetique
+  labs(title = "Histogramme et Courbe de densité des tirages",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", 
+                                "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+**Q3 : Expliquez comment on peut générer un vecteur de valeurs 0 et 1 avec une probabilité p de tirage attribuée aux valeurs 1.**
+
+Lorsque nous utilisons la fonction **`sample()`**, nous avons la possibilité d'utiliser l'argument **`proba`**, qui nous permet d'assigner des probabilités spécifiques à chaque élément pour réguler leur occurrence dans l'échantillon généré.
+
+En choisissant d'utiliser la fonction **`rbinom()`** pour réaliser des tirages selon une loi binomiale, il est important de définir le paramètre **`size`** afin de spécifier le nombre d'essais effectués à chaque tirage. En fixant **`size`** à 1, nous avons pouvons ainsi réaliser 30 tirages suivant une loi de Bernoulli, chacun des tirage représentant un essai binaire distinct.
+
+Voici la commande R associée :
+
+```{r}
+# Générer un vecteur de 30 valeurs 0-1 avec p = 0.33
+# Avec Sample
+vecteur_sample_O1 <- sample(c(0, 1), size = 30, 
+                            replace = TRUE, prob = c(1 - 0.33, 0.33))
+# Avec Rbinom
+vecteur_rbinom_01 <- rbinom(30, size = 1, prob = 0.33)
+
+vecteur_sample_O1
+```
+
+Nous avons la possibilité d'analyser les fréquences du vecteur de tirage 0-1 en utilisant la fonction **`table`**, laquelle génère la table de comptage associée à ce vecteur.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Création de la table de compage avec la fonction table
+table_comptage <- table(vecteur_sample_O1)
+# Création de la table associées
+df_table_comptage <- as.data.frame(table_comptage)
+colnames(df_table_comptage) <- c("Valeur", "Fréquence")
+# Afficher la table avec kable
+kable(df_table_comptage, caption = "Table de comptage") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Une manière efficace de représenter graphiquement les fréquences est d'utiliser un barplot ou un pie plot.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Bar plot
+barplot <- ggplot(df_table_comptage, aes(x = Valeur, y = Fréquence)) +
+  # Ajout du bar plot
+  geom_bar(stat = "identity", 
+           position = "dodge", 
+           color = "black", 
+           fill = c("lightblue", "lightgreen")) +
+  # Ajout de la valeur de comptage dans la bar associée
+  geom_text(aes(label = Fréquence),
+            color = "white",
+            size = 6, 
+            position = position_stack(vjust = 0.5)) +
+  labs(title = "Barplot des fréquences du vecteur 0-1", 
+       x = "Valeur", y = "Fréquence") +
+  theme_minimal()
+
+# Pie plot
+pieplot <- ggplot(df_table_comptage, aes(x = "", y = Fréquence, fill = Valeur)) +
+  geom_bar(stat = "identity", 
+           width = 1, 
+           color = "black", fill = c("lightgreen","lightblue")) +
+  coord_polar(theta = "y") +
+  # Placement des valeurs
+  geom_text(aes(label = Fréquence, theta = cumsum(Fréquence) - 0.5 * Fréquence),
+            color = "white",
+            size = 6) +
+  labs(title = "Pie plot des fréquences du vecteur 0-1", fill = "Valeur") +
+  theme_minimal()+
+  theme(axis.text = element_blank(), axis.title = element_blank(),
+        panel.grid = element_blank())
+
+
+grid.arrange(barplot, pieplot, nrow = 1)
+```
+
+**Q4 : Modèle linéaire Gaussien. Description**
+
+Dans cette question nous nous intéréssons au modèle linéaire défini par :
+
+$$
+Y = a \times X + b +\epsilon
+$$
+
+Où :
+
+-   $\epsilon$ représente le terme d'erreur du modèle de manière a ce que $\epsilon \sim \mathcal{N}(0, \sigma^2)$
+-   $\sigma = 2, a = 2, b = 0.5$
+-   On suppose de plus que $X \sim \mathcal{N}(0, 1)$
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Refixons la seed
+set.seed(42)
+
+# Initialisons les variables
+a <- 2
+b <- 0.5
+sigma <- 2
+n <- 30
+
+# Générons les valeurs de X à partir d'une loi normale N(0,1)
+X <- rnorm(n, mean = 0, sd =1)
+
+# Générons les valeurs de l'erreur epsilon à partir d'une loi normale N(0, sigma**2)
+eps <- rnorm(n, mean = 0, sd = sigma**2)
+
+# Calculons les valeurs de Y selon le modèle linéaire gaussien
+Y = a * X + b + eps
+
+# Enregistrement des données dans un data frame
+df_gaussien <- data.frame(X = X, epsilon = eps, Y = Y)
+
+# Affichage de la table avec kable
+kable(head(df_gaussien), caption = "Modèle Gaussien") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+Nous pouvons à présent analyser notre data frame. Commençons par afficher le résumé global du data frame à l'aide de la fonction **`summary`**.
+
+```{r}
+kable(summary(df_gaussien), caption = "Summary du modèle gaussien") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+Grace à ce summay nous pouvons vérifier les paramètres de distribution de $X$ et de $\epsilon$ . Nous observons que la moyenne est proche de 0 pour les deux. Nous obesrvons de plus que la moyenne et la médiane de $Y$ sont proche ce qui pourrait indiquer que Y suit une loi normale. Ce qui est en réalité le cas par le théorème central limite qui nous dit que la somme de variable aléatoires indépendantes et i.i.d converge vers une distribution normale. Ceci est valable sur des grand échantillon on parle bien de convergence.
+
+Nous pouvons vérifier nos propos en affichant les différents histogrammes.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Affichons l'histogramme et les densité pour X et epsilon on garde la même forme que dans un des graphique précédent
+# Pour X
+p1 <- ggplot(df_gaussien, aes(x = X)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), 
+                 bins = 10, 
+                 color = "black", 
+                 alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), 
+               alpha = 0.3, 
+               linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 1), 
+                aes(color = "Densité théorique"), 
+                linewidth = 1, linetype = "dashed") +
+  labs(title = "Histogramme et Courbe de densité pour X",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", 
+                                "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+
+# Pour epsilon
+p2 <- ggplot(df_gaussien, aes(x = epsilon)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), bins = 10, color = "black", alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), alpha = 0.3, linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = sigma**2), aes(color = "Densité théorique"), linewidth = 1, linetype = "dashed") +
+  labs(title = "Histogramme et Courbe de densité pour epsilon",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+# Affichage des deux graphiques l'un à coté de l'autre avec grid.arange
+grid.arrange(p1, p2, nrow = 1)
+```
+
+Nous constatons que la distribution empirique de l'échantillon est étroitement alignée avec la distribution théorique normale décrite précédemment. Les deux courbes de densité sont très proches ce qui suggère que les données générées suivent effectivement la distribution théorique prévue.
+
+Nous pouvons maintenant verifier la normalité de Y en analysant l'histogramme et la densité de Y
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+ggplot(df_gaussien, aes(x = Y)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), 
+                 bins = 10, 
+                 color = "black", 
+                 alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), 
+               alpha = 0.3, 
+               linewidth = 1)  +
+  labs(title = "Histogramme et Courbe de densité pour Y",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", 
+                                "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+30 valeurs n'est pas suffisant pour bien visualiser la courbe gaussienne. Nous allons essayer avec 1000 valeurs :
+
+```{r, echo = F, fig.width=12, fig.height=6, fig.align='center'}
+
+# Générons les valeurs de X à partir d'une loi normale N(0,1)
+X2 <- rnorm(1000, mean = 0, sd =1)
+
+# Générons les valeurs de l'erreur epsilon à partir d'une loi normale N(0, sigma**2)
+eps2 <- rnorm(1000, mean = 0, sd = sigma**2)
+
+# Calculons les valeurs de Y selon le modèle linéaire gaussien
+Y2 = a * X2 + b + eps2
+
+# Enregistrement des données dans un data frame
+df_gaussien2 <- data.frame(X = X2, epsilon = eps2, Y = Y2)
+
+# PLOT POUR X
+p1 <- ggplot(df_gaussien2, aes(x = X)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), bins = 10, color = "black", alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), alpha = 0.3, linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 1), aes(color = "Densité théorique"), linewidth = 1, linetype = "dashed") +
+  labs(title = "Histogramme et Courbe de densité pour X",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+# PLOT POUR EPSILON
+p2 <- ggplot(df_gaussien2, aes(x = epsilon)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), bins = 10, color = "black", alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), alpha = 0.3, linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = sigma**2), aes(color = "Densité théorique"), linewidth = 1, linetype = "dashed") +
+  labs(title = "Histogramme et Courbe de densité pour epsilon",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+p3 <- ggplot(df_gaussien2, aes(x = Y)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), bins = 10, color = "black", alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), alpha = 0.3, linewidth = 1)  +
+  labs(title = "Histogramme et Courbe de densité pour Y",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+grid.arrange(p1, p2,p3 ,nrow = 2)
+```
+
+Nous observons pour Y une courbe gaussienne. Avec 1000 valeurs on se rend déjà plus compte de la distribution normale des données Y.
+
+**Q5 : Modèle linéaire Gaussien. Estimation des paramètres de la droite de régression.**
+
+La méthode des moindres carrés ordinaires est une technique d'estimation des paramètres d'une droite de régression dans un modèle linéaire. Le principe fondamental est de minimiser la somme des carrés des écarts entre les valeurs observées et les valeurs prédites par la droite de régression.
+
+$$
+Q(b_{0},b_{1}) = \sum_{i = 1}^{n}(Y_{i} -(b_{0} + b_{1}\times X_{i}))^2
+$$
+
+Le processus d'estimation des paramètres de la droite de régression par les moindres carrés consiste à trouver les coefficients $a$ et $b$ tels que la somme des carrés des résidus (différences entre les valeurs observées et les valeurs prédites) soit minimale.
+
+Le nuage de points des valeurs $(X,Y)$ peut être représenté graphiquement. La droite de régression est tracée de manière à minimiser la distance verticale entre chaque point et la droite. Cette droite est souvent appelée la "ligne de régression des moindres carrés".
+
+Nous pouvons facilement retrouver en minimisant (annuler la dérivée) $Q(b_{0},b_{1})$ les formules suivantes :
+
+$$
+b_{1} = \frac{\text{cov}(X, Y)}{\text{Var}(X)}
+$$
+
+$$
+b_{0} = \bar{Y} - b_{1}\times\bar{X}
+$$
+
+La droite de regression par les moindres carrés s'écrit donc ainsi :
+
+$$
+\hat{Y} = b_{0} + b_{1}\times X
+$$
+
+```{r}
+b1 <- cov(df_gaussien$X, df_gaussien$Y) / var(df_gaussien$X)
+b1
+```
+
+```{r}
+mean(df_gaussien$Y) - b1 * mean(df_gaussien$X) 
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Affichage du scatter plot (X, Y)
+scatter_plot <- ggplot(df_gaussien, aes(x = X, y = Y)) +
+  geom_point(color = "blue") +
+  # Ajout de la droite de regression linéaire avec geom_smooth
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  # Ajout de la droite de régression
+  labs(title = "Nuage de points et droite de régression",
+       x = "Valeurs de X",
+       y = "Valeurs de Y")
+
+# Ajout de l'equation de la droite de regression linéaire et affichage
+scatter_plot + stat_regline_equation(label.x = 0.9, label.y = 0.4)
+```
+
+On obtient une droite de régression paramétrée par $y = 0.059 + 1.3X$ ce qui change en fonction de la seed évidement.
+
+**Q6 : Modèle linéaire Gaussien. Estimation des paramètres avec `lm()`**.
+
+```{r}
+# Nous utilisons ici la fonction lm pour réaliser l'estimation des paramètres
+modele_lm <- lm(Y~X, data = df_gaussien)
+modele_lm_summary <- summary(modele_lm)
+print(modele_lm_summary)
+```
+
+Nous obtenons l'estimation des paramètres suivant :
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Récupération des coefficients
+coefficients_estimes <- coef(modele_lm)
+kable(t(coefficients_estimes), caption = "Estimation des paramètres lm") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+On obtient exactement les même coefficients qu'a la question précédente.
+
+Nous allons maintenant utiliser la droite de régression afin de faire des prédictions.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Prédiction à l 'aide de la méthode prédict
+df_gaussien$Y_pred <- predict(modele_lm)
+# Récupération des erreurs avec la methode residuals
+df_gaussien$erreurs <- residuals(modele_lm)
+# Ajout dans le data frame les prédictions et les erreurs
+kable(head(df_gaussien), caption = "Head du modèle gaussien") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+L'erreur totale du modèle est :
+
+```{r}
+print(paste("Erreur totale du modèle (SSE):", sum(residuals(modele_lm)^2)))
+```
+
+En règle générale, il est difficile de déterminer si une valeur de SSE est "élevée" ou "faible" sans avoir de référence à d'autres modèles ou sans connaître la gamme typique des SSE pour des problèmes similaires.
+
+C'est pour cela que nous utilisons l'indicateur R2 qui représente la proportions de la variabilité totale expliquée par le modèle.
+
+```{r}
+print(paste("R2 score : ", round(modele_lm_summary$r.squared, 4)))
+```
+
+Le R2 est assez faible ce qui indique que le modèle n'explique que très peu de la variance observée.
+
+**Q7 : Modèle linéaire Gaussien. Fonction de généralisation.**
+
+Cette fonction permet de généraliser l'affichage de la droite de régression.
+
+```{r}
+simul_mlg <- function(a, b, sigma, n, seed){
+  set.seed(seed)
+  X <- rnorm(n, mean = 0, sd = 1)
+  eps <- rnorm(n, mean = 0, sd = sigma**2)
+  Y <- a * X + b + eps
+  plot_data <- data.frame(X, Y)
+  
+  scatter_plot <- ggplot(plot_data, aes(x = X, y = Y)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Nuage de points et droite de régression",
+       x = "Valeurs de X",
+       y = "Valeurs de Y")
+
+  # Affichage du graphique
+  scatter_plot + stat_regline_equation(label.x = 0.9, label.y = 0.4)
+}
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+simul_mlg(a = 2, b = 0.5, sigma = 0.5, n = 30, seed = 123)
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+simul_mlg(a = 2, b = 0.5, sigma = 5, n = 30, seed = 123)
+```
+
+**Q8 : Modèle logistique binaire. Description.**
+
+Dans cette question nous souhaitons générer les réalisations d'un modèle logistique binaire qui caractérise le lien entre une variable $Y$ à valeur dans $\{0, 1\}$ et un prédicteur linéaire $xbeta = 2 + 10 * X$. De plus on suppose que $X \sim \mathcal{N}(0,1)$.
+
+Nous allons générer 30 valeurs de $xbeta$ pour ensuite en déduire 30 valeurs des probabilités des réalisations de $(Y = 1 | X)$ à l'aide de la fonction Sigmoid ou logistique $p = \frac{1}{1+e^-(xbeta)}$
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Fonction logistique
+sigmoid <- function(x) {
+  return(1 / (1 + exp(-x)))
+}
+# Affichage de la fonction logistique
+X <- seq(-6, 6, by = 0.1)
+plot(X, sigmoid(X), type = "l", col = "blue", lwd = 2, main = "Fonction Sigmoïde", 
+     xlab = "X", ylab = "sigmoid(X)")
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+set.seed(42)
+# Génération de 30 valeurs suivant une loi normale centrée réduite
+X <- rnorm(30, mean = 0, sd = 1)
+# Calcul de xbeta avec le prédicteur linéaire
+xbeta <- 2 + 10 * X
+
+# Calculons la probabilité p avec la fonction sigmoid
+p <- sigmoid(xbeta)
+
+# Générons les valeurs de Y en utilisant rbinom
+Y <- rbinom(30, 1, p)
+
+data_table <- data.frame(X, xbeta, p, Y)
+
+kable(summary(data_table), caption = "Summary du modèle logistique binaire") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+kable(head(data_table), caption = "Head du modèle logistique binaire") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# PLOT POUR X
+p1 <- ggplot(data_table, aes(x = X)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), 
+                 bins = 10, 
+                 color = "black", 
+                 alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), 
+               alpha = 0.3, 
+               linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 1), 
+                aes(color = "Densité théorique"), 
+                linewidth = 1, linetype = "dashed") +
+  labs(title = "Histogramme et Courbe de densité pour X",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", 
+                                "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+
+# PLOT POUR XBETA
+p2 <- ggplot(data_table, aes(x = xbeta)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), 
+                 bins = 10, color = "black", alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), 
+               alpha = 0.3, linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = 2, sd = 10), 
+                aes(color = "Densité théorique"), 
+                linewidth = 1, linetype = "dashed") +
+  labs(title = "Histogramme et Courbe de densité pour xbeta",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+grid.arrange(p1, p2 ,ncol = 2)
+```
+
+La variable aléatoire $X$ suit une loi normale centrée réduite, ce qui signifie qu'elle est tirée d'une distribution normale avec une moyenne $\mu$ égale à zéro et un écart type $\sigma$ égal à un. Mathématiquement, cela peut être exprimé comme $X \sim \mathcal{N}(0,1)$.
+
+De manière similaire, la combinaison linéaire $xbeta = 2 + 10 * X$ suit également une distribution normale.
+
+En termes plus formels, si $X \sim \mathcal{N}(0,1)$, alors $xbeta = 2 + 10 * X$ suit une distribution normale avec un moyenne $\mu = 2$ et un écart type $\sigma = 10$. Donc $xbeta \sim \mathcal{N}(2,10^2)$
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+p3 <- ggplot(data_table, aes(x = p)) +
+  geom_histogram(aes(y = after_stat(density), fill = "Distribution Empirique"), 
+                 bins = 10, 
+                 color = "black", 
+                 alpha = 0.5) +
+  geom_density(aes(color = "Densité Empirique", fill ="Densité Empirique"), 
+               alpha = 0.3, linewidth = 1)  +
+  labs(title = "Histogramme et Courbe de densité pour p",
+       x = "Valeurs",
+       y = "Densité",
+       fill = "Distribution",
+       color = "Densité") +
+  scale_color_manual(name = "Densité",
+                     values = c("Densité Empirique" = "green", "Densité théorique" = "blue")) +
+  scale_fill_manual(name = "Distribution",
+                    values = c("Distribution Empirique" = "lightblue")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+p4 <-ggplot(data_table, aes(x = factor(Y))) +
+  geom_bar(fill = c("green", "lightblue"), color = "black") +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = 2, size = 10, color = "white") +
+  labs(title = "Distribution de Y", x = "Valeurs de Y", y = "Fréquence") +
+  theme_minimal()
+
+grid.arrange(p3, p4 ,ncol = 2)
+```
+
+Nous pouvons observer que $Y_{i}$ suit un loi de bernoulli de paramètre $p_{i} = \frac{1}{1+e^{-xbeta_{i}}}$
+
+**Q9 : Modèle logistique binaire. Estimation des paramètres avec `glm()`.**
+
+Dans cette question nous souhaitons estimer les paramètres du modèle logistique de $Y$ en fonction de $X$ à l'aide de la fonction `glm()`. **GLM** correspond à ***generalized linear model***
+
+La procédure Modèles linéaires généralisés développe le modèle linéaire général de sorte que la variable dépendante $Y$ soit linéairement reliée aux facteurs et covariables $X$ via une fonction de lien précise. En outre, le modèle permet à la variable dépendante de suivre une distribution non normale. Il couvre des modèles statistiques largement utilisés : la régression linéaire pour les réponses distribuées normalement, les modèles logistiques pour les données binaires...
+
+La possibilité de spécifier une distribution non normale et une fonction de lien sans identité constitue la principale amélioration du modèle linéaire généralisé par rapport au modèle linéaire général. Il existe de nombreuses combinaisons distribution/fonction de lien possibles, et plusieurs peuvent convenir à un jeu de données particulier.
+
+Remettons les choses au clair. Dans l'exercice nous avons :
+
+-   Un prédicteur linéaire défini par $xbeta = 2 + 10 \times X$
+
+-   Une probabilité de succès $p$ définie par la fonction logistique $p = \frac{1}{1+e^{-xbeta}} = \frac{1}{1+e^{-(2 + 10\times X)}}$
+
+On a donc : $P(Y_{i} = 1|X_{i} = x) = p_{i} = \frac{1}{1+e^{-xbeta_{i}}} = \frac{1}{1+e^{-(2 + 10\times X_{i})}}$
+
+En inversant on obtient :
+
+$2 + 10 \times X = logit(p)$ avec $logit(p) = log(\frac{p}{1-p})$
+
+La fonction de lien (dans ce cas, la fonction logit) permet d'établir une connexion entre la partie linéaire du modèle et les probabilités de succès. Elle joue un rôle central dans la modélisation des données binaires en transformant le prédicteur linéaire en probabilités sur une échelle plus appropriée pour des variables binaires. En effet en regardant la courbe de la fonction logistique on remarque bien qu'elle est a valeurs dans 0, 1.
+
+```{r}
+modele_glm <- glm(Y~X, data = data_table)
+print(modele_glm$family)
+```
+
+Dans le cas initiale, nous avons **`Family : gaussian`** et **`Link function : identity`**.
+
+L'indication **`Family : gaussian`** indique que la variable dépendante suit une distribution normale. Dans le cas d'une régression linéaire cela signifie que les résidus du modèle sont distribués normalement.
+
+La spécification **`Link function: identity`** indique que la relation entre la moyenne de la distribution conditionnelle des données et le prédicteur linéaire est une fonction identité. En d'autres termes, la moyenne de la distribution est directement liée au prédicteur linéaire sans subir de transformation non linéaire.
+
+Dans notre cas comme nous avons vu juste au dessus les données $Y$ sont binaire (0 ou 1), il est donc préférable de changer les paramètres :
+
+-   **`Family`** en Binomial
+
+-   **`Link function`** en logit
+
+```{r}
+# Modele d'estimation des parametre avec glm
+modele_glm <- glm(Y~X, family = binomial(link = "logit"),  data = data_table)
+summary(modele_glm)
+```
+
+**Q10 : Modèle logistique binaire. Représentation des données** $X$ **et** $Y$ **en affichant le modèle logistique.**
+
+Voici la représentation des donnée avec le modèle logistique.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+# Prédiction sous forme de probabilité à l'aide du modèle  et ajout dans dataframe
+data_table$Predicted_Prob <- predict(modele_glm, type = "response")
+# Calcule des erreurs
+data_table$Prediction_Erreur <- residuals(modele_glm, type = "response")
+
+# Représentation graphique des données X et Y avec le modèle logistique
+ggplot(data_table, aes(x = X, y = Y)) +
+  geom_point(aes(color = as.factor(Y)), size = 4) +  # Points colorés selon la variable Y
+  geom_line(aes(y = Predicted_Prob), color = "blue", linewidth = 1) +  # Courbe du modèle logistique
+  labs(title = "Modèle Logistique Binaire - Données X et Y", x = "X", y = "Y") +
+  theme_minimal()
+```
+
+Nous pouvons aussi utiliser **`geom_smooth`** avec **`method = "glm"`**.
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+ggplot(data_table, aes(x = X, y = Y)) +
+  geom_point(aes(color = as.factor(Y)), size = 3) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE, color = "blue") +
+  labs(title = "Modèle Logistique Binaire - Données X et Y", x = "X", y = "Y") +
+  theme_minimal()
+```
+
+```{r, fig.width=12, fig.height=6, fig.align='center'}
+kable(head(data_table), caption = "modèle logistique binaire avec prédictions") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+**Q11 : Modèle logistique binaire. Evaluation des performances du modèle.**
+
+Pour évaluer les perfomances de classification du modèle logistique linéaire, nous avons à disposition plusieurs mesures.
+
+-   **Taux de bonne prédictions** : Cette mesure correspond à la proportion d'observations correctement prédites par le modèle.
+
+    La formule associées est : $\frac{\text{Nombre d'obs bien classées}}{\text{Nombre total d'obs}}$
+
+-   **Taux de bonne prédictions pour les valeurs 0 et 1** : Cette mesure correspond à la précision du modèle pour prédire chaque classe (0, 1). C'est la proportion d'obesrvation de la classe $i$ qui ont été correctement prédites par le modèle.
+
+    La formule associée pour 1 est : $\frac{\text{Nombre de Vrais Positifs}}{\text{Nombre total d'obs de classe 1}}$
+
+-   **Courbe ROC (Receiver Operating Characteristic)** : La courbe ROC est un graphique représentant la relation entre la sensibilité (taux de vrais positifs) et la spécificité (taux de faux positifs) d'un modèle pour différentes valeurs seuil de probabilité. L'axe des x (abscisses) représente le taux de faux positifs (1 - spécificité). L'axe des y (ordonnées) représente le taux de vrais positifs (sensibilité). Plus la courbe ROC est proche du coin supérieur gauche, meilleure est la capacité du modèle à distinguer entre les deux classes. Une ligne droite diagonale du coin inférieur gauche au coin supérieur droit représenterait une performance aléatoire.
+
+-   **Courbe AUC (Area Under the Curve)** : L'AUC mesure la surface sous la courbe ROC. Il donne une mesure agrégée de la performance du modèle sur l'ensemble de la gamme des seuils de probabilité possibles. Une AUC de 0.5 correspond à une performance aléatoire (comme une ligne droite diagonale). Une AUC de 1.0 indique une performance parfaite (la courbe atteint le coin supérieur gauche). L'AUC mesure la capacité du modèle à classer correctement les observations positives et négatives. Une AUC élevée indique une meilleure capacité de discrimination du modèle.
+
+Commencons par initialiser un seuil de décision.
+
+```{r}
+# Seuil de 0.5 pour les probabilités prédites
+threshold <- 0.5
+
+# Prédictions binaires (0, 1) basées sur le seuil(threshold) et ajout à la table
+data_table$Predicted <- ifelse(data_table$Predicted_Prob >= threshold, 1, 0)
+# Affichage de la table
+kable(head(data_table), caption = "modèle logistique binaire avec prédictions") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+Le seuil est utilisé pour classifier les observations de la manière suivante : tous les individus ayant une **`Predicted_Prob > seuil = 0.5`** seront classés positivement (1), tandis que ceux avec **`Predicted_Prob < seuil = 0.5`** seront classés négativement (0).
+
+Pour initier l'analyse, nous allons nous focaliser sur l'évaluation basée sur les taux. Pour ce faire, nous utiliserons la matrice de confusion.
+
+```{r}
+# Calcul de la matrice de confustion avec la fonction table
+confusion_matrix <- table(Prédiction = data_table$Predicted, Observé = data_table$Y)
+# Changement du nom des colonnes avec la fonction rownames
+rownames(confusion_matrix) <- colnames(confusion_matrix) <- c("Classe 0", "Classe 1")
+
+# Creation du tableau associé à la matrice de confusion
+kable(confusion_matrix, caption = "Matrice de confusion") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+Nous constatons que seulement 2 observations sont incorrectement classées.
+
+Procédons au calcul des taux de bonnes prédictions pour les valeurs 0 et 1 en utilisant la matrice de confusion. Nous pouvons également ajouter la sensibilité et la spécificité avec les formules suivantes :
+
+ps : on concidère que négatif est 0 et positif est 1
+
+Spécificité : $\frac{\text{Vrai négatifs}}{\text{Vrai négatif} + \text{Faux positifs}}$
+
+Sensitivité : $\frac{\text{Vrai positifs}}{\text{Faux négatif} + \text{Vrai positifs}}$
+
+```{r}
+# Calcul des différentes mesures de taux en lisant directement la matrice de confusion
+taux_total <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+taux_0 <- confusion_matrix[1, 1] / sum(confusion_matrix[1, ])
+taux_1 <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+sensitivity <- confusion_matrix[1, 1] / sum(confusion_matrix[1, ])
+specificity <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+
+# Créer un dataframe avec les taux
+taux_df <- data.frame(
+  "Taux Total" = taux_total,
+  "Taux Classe 0" = taux_0,
+  "Taux Classe 1" = taux_1,
+  "Sensibilité" = sensitivity,
+  "Spécificité" = specificity
+)
+
+# Afficher le tableau
+kable(taux_df, caption = "Taux de Prédiction") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+
+```
+
+Nous observons des taux supérieurs à 0.90, indiquant une précision de plus de 90%. Ces résultats sont encourageants, suggérant que notre modèle est efficace. Une possibilité pour son amélioration consiste à ajuster le seuil de décision. Une méthode courante pour ce faire est l'utilisation de la courbe ROC.
+
+Passons à l'analyse de la courbe ROC et de l'AUC.
+
+```{r}
+# Importation de la biblioteque de la ROC
+library(pROC)
+par(pty = "s")
+roc(data_table$Y, 
+    data_table$Predicted_Prob, 
+    plot = T, 
+    legacy.axes = T,
+    percent = T,
+    xlab = "Pourcentage de Faux Positives (1 - Spécificité)", 
+    ylab =  "Pourcentage de Vrai Positif (Sensitivité)",
+    col = "blue", lwd = 4, print.auc = T,verbose = FALSE)
+
+# On rapplique affin de récupérer les données de la ROC 
+roc.info <- roc(data_table$Y, 
+                data_table$Predicted_Prob, 
+                legacy.axes = T, 
+                verbose = FALSE)
+# Ajout des donnée de la courbe de ROC à un data frame en pourcenatge
+roc.df <- data.frame("True_Pos_Pourcent" = roc.info$sensitivities*100,
+                     "False_Pos_Pourcent" = (1-roc.info$specificities)*100,
+                     "thresholds" = roc.info$thresholds)
+```
+
+```{r}
+kable(roc.df, caption = "Tableau résumé de la ROC") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+```
+
+Affichons seulement les lignes ayant une **`True_Pos_Pourcent > 77.7`** car en dessous la précision serait trop faible. De plus on remaquons qu'au dessus de 20 le **`False_Pos_Pourcentage`** est trop élevé.
+
+Nous obtenons donc ce tableau :
+
+```{r}
+# Affichons seulement les données que nous souhaitons étudier 
+kable(roc.df[roc.df$True_Pos_Pourcent > 77.7 & roc.df$False_Pos_Pourcent < 20 , ], caption = "Tableau résumé de la ROC") %>%
+  kable_styling(c("striped", "hover"), full_width = FALSE)
+
+```
+
+L'objectif est d'identifier le seuil qui offre un équilibre optimal entre les Vrais Positifs et les Faux Positifs. Par exemple, il est inutile de choisir un seuil de 0.57 lorsque le seuil de 0.48 offre une précision plus élevée pour les Vrais Positifs (94.4% contre 88.8%) tout en maintenant le même taux de Faux Positifs (8.33%). Dans ce contexte, il est plus judicieux d'opter pour un seuil de 0.48.
+
+Le seuil initial fixé à 0.5 semble donc être un bon choix, car il produit des résultats comparables à ceux obtenus avec un seuil de 0.48.
+
+Nous pouvons conclure en notant un AUC de 95.8 %, démontrant une capacité de discrimination exceptionnellement élevée pour le modèle.
+
+```{r}
+threshold <- 0.48
+
+# Prédictions binaires basées sur le seuil
+data_table$Predicted <- ifelse(data_table$Predicted_Prob >= threshold, 1, 0)
+confusion_matrix <- table(Prédiction = data_table$Predicted, Observé = data_table$Y)
+save(confusion_matrix, file = "dataframes.RData")
+rownames(confusion_matrix) <- colnames(confusion_matrix) <- c("Classe 0", "Classe 1")
+
+# Créer un tableau kable avec la matrice de confusion
+kable(confusion_matrix, caption = "Matrice de confusion") %>% kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+```{r}
+liste_dataframes <- ls()
+
+# Enregistrer tous les dataframes dans un fichier .RData
+save(list = liste_dataframes, file = "dataframes.RData")
+```
+
+```{r}
+liste_dataframes
+```
